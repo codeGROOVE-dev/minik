@@ -1,0 +1,339 @@
+// Wait for Tauri to be available
+const { invoke } = window.__TAURI__.core;
+
+// Check if shell plugin is available
+let open;
+if (window.__TAURI__.shell) {
+    open = window.__TAURI__.shell.open;
+} else {
+    console.warn('Shell plugin not available, links will not open');
+    open = () => console.log('Shell plugin not available');
+}
+
+let currentProjectData = null;
+let isExpanded = false;
+let refreshInterval = null;
+
+const COLUMN_COLORS = ['yellow', 'blue', 'green', 'pink', 'orange', 'purple'];
+
+// Initialize app
+document.addEventListener('DOMContentLoaded', async () => {
+    console.log('DOM Content Loaded, starting initialization...');
+
+    try {
+        updateStatus('Checking GitHub authentication...');
+        await checkAuth();
+
+        updateStatus('Loading saved project...');
+        await loadSavedProject();
+
+        updateStatus('Setting up interface...');
+        setupEventListeners();
+        startAutoRefresh();
+
+        // If no project is loaded, try to load the first available project
+        if (!currentProjectData) {
+            updateStatus('No saved project found, searching for projects...');
+            await loadFirstAvailableProject();
+        }
+    } catch (error) {
+        console.error('Initialization error:', error);
+        updateStatus(`Error: ${error.message || error}`);
+        showError(`Initialization failed: ${error}`);
+    }
+});
+
+async function checkAuth() {
+    try {
+        await invoke('github_token');
+        updateStatus('GitHub authenticated successfully');
+    } catch (error) {
+        updateStatus('GitHub authentication failed!');
+        showError('GitHub authentication required. Please run "gh auth login" first.');
+    }
+}
+
+async function loadSavedProject() {
+    try {
+        const projectId = await invoke('current_project');
+        if (projectId) {
+            updateStatus('Loading saved project data...');
+            await loadProjectData(projectId);
+        } else {
+            updateStatus('No saved project found');
+        }
+    } catch (error) {
+        console.error('Failed to load saved project:', error);
+        updateStatus('Failed to load saved project');
+    }
+}
+
+async function loadFirstAvailableProject() {
+    try {
+        console.log('No saved project found, loading first available project...');
+        updateStatus('Fetching your GitHub organizations...');
+
+        // Get list of organizations
+        const orgs = await invoke('list_organizations');
+        if (!orgs || orgs.length === 0) {
+            console.log('No organizations found');
+            updateStatus('No organizations found');
+            showError('No GitHub organizations found. Please ensure you have access to at least one organization with projects.');
+            return;
+        }
+
+        updateStatus(`Found ${orgs.length} organization(s), searching for projects...`);
+        console.log(`Organizations found: ${orgs.map(o => o.login).join(', ')}`);
+
+        // Try to find a project in all organizations
+        for (let i = 0; i < orgs.length; i++) {
+            const org = orgs[i];
+            console.log(`Checking organization ${i + 1}/${orgs.length}: ${org.login}`);
+            updateStatus(`Checking org ${i + 1}/${orgs.length}: ${org.login}...`);
+            try {
+                const projects = await invoke('list_org_projects', { org: org.login });
+                if (projects && projects.length > 0) {
+                    console.log(`Found ${projects.length} projects in ${org.login}`);
+                    updateStatus(`Found ${projects.length} project(s) in ${org.login}`);
+                    // Load the first project
+                    const firstProject = projects[0];
+                    updateStatus(`Loading project: ${firstProject.title}...`);
+                    await invoke('select_project', { projectId: firstProject.id });
+                    await loadProjectData(firstProject.id);
+                    console.log(`Loaded project: ${firstProject.title}`);
+                    return;
+                }
+            } catch (error) {
+                console.error(`Failed to list projects for ${org.login}:`, error);
+                // Check if it's a permissions error
+                if (error.toString().includes('INSUFFICIENT_SCOPES') || error.toString().includes('read:project')) {
+                    updateStatus(`Need 'project' scope for ${org.login}, trying next...`);
+                } else {
+                    updateStatus(`Error checking ${org.login}, trying next...`);
+                }
+            }
+        }
+
+        console.log('No projects found in any organization');
+        updateStatus('No projects found in any organization');
+        showError('No GitHub projects found. Please create a project in one of your organizations first.');
+    } catch (error) {
+        console.error('Failed to load first available project:', error);
+        showError(`Failed to load projects: ${error}`);
+    }
+}
+
+async function loadProjectData(projectId) {
+    try {
+        updateStatus('Fetching project data from GitHub...');
+        const projectData = await invoke('project_data', { projectId });
+        currentProjectData = projectData;
+        updateStatus('Rendering project...');
+        renderProject();
+    } catch (error) {
+        updateStatus('Failed to load project data');
+        showError(`Failed to load project: ${error}`);
+    }
+}
+
+function renderProject() {
+    if (!currentProjectData) return;
+
+    renderMinimizedView();
+    renderExpandedView();
+}
+
+function renderMinimizedView() {
+    const summary = document.getElementById('columns-summary');
+    const hiddenColumns = currentProjectData.hiddenColumns || [];
+
+    const visibleColumns = currentProjectData.columns.filter(
+        col => !hiddenColumns.includes(col.id)
+    );
+
+    const columnsHtml = visibleColumns.map((column, index) => {
+        const colorClass = `column-${COLUMN_COLORS[index % COLUMN_COLORS.length]}`;
+        return `
+            <span class="column-badge ${colorClass}">
+                ${column.name}: <span class="column-count">${column.items_count}</span>
+            </span>
+        `;
+    }).join('');
+
+    summary.innerHTML = columnsHtml || '<span class="loading">No project selected</span>';
+}
+
+function renderExpandedView() {
+    const board = document.getElementById('kanban-board');
+    const hiddenColumns = currentProjectData.hiddenColumns || [];
+
+    const visibleColumns = currentProjectData.columns.filter(
+        col => !hiddenColumns.includes(col.id)
+    );
+
+    const columnsHtml = visibleColumns.map((column, index) => {
+        const colorClass = `column-${COLUMN_COLORS[index % COLUMN_COLORS.length]}`;
+        const items = currentProjectData.items.filter(item => item.column_id === column.id);
+
+        const cardsHtml = items.map(item => `
+            <div class="kanban-card" data-url="${item.url || '#'}">
+                <div class="card-title">${escapeHtml(item.title)}</div>
+                <div class="card-meta">
+                    ${item.assignees.length > 0 ? `
+                        <div class="card-assignees">
+                            ${item.assignees.map(a => `<span class="assignee">@${escapeHtml(a)}</span>`).join('')}
+                        </div>
+                    ` : ''}
+                    ${item.labels.length > 0 ? `
+                        <div class="card-labels">
+                            ${item.labels.map(l => `<span class="label">${escapeHtml(l)}</span>`).join('')}
+                        </div>
+                    ` : ''}
+                </div>
+            </div>
+        `).join('');
+
+        return `
+            <div class="kanban-column ${colorClass}">
+                <div class="column-header">
+                    <span>${escapeHtml(column.name)}</span>
+                    <span class="column-count-badge">${items.length}</span>
+                </div>
+                <div class="column-cards">
+                    ${cardsHtml || '<div style="color: #999; font-size: 11px;">No items</div>'}
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    board.innerHTML = columnsHtml || '<div style="padding: 20px; color: #999;">No columns to display</div>';
+
+    // Add click handlers for cards
+    board.querySelectorAll('.kanban-card').forEach(card => {
+        card.addEventListener('click', () => {
+            const url = card.dataset.url;
+            if (url && url !== '#') {
+                open(url);
+            }
+        });
+    });
+}
+
+function setupEventListeners() {
+    // Double-click to toggle view on both minimized and expanded views
+    document.getElementById('minimized-view').addEventListener('dblclick', toggleView);
+    document.getElementById('expanded-view').addEventListener('dblclick', (e) => {
+        // Only toggle if not clicking on interactive elements
+        if (!e.target.closest('.kanban-card') &&
+            !e.target.closest('.control-btn') &&
+            !e.target.closest('button')) {
+            toggleView();
+        }
+    });
+
+    // Note: Minimize and refresh buttons removed from UI
+
+    // Error close button
+    document.getElementById('error-close').addEventListener('click', () => {
+        document.getElementById('error-message').classList.add('hidden');
+    });
+
+    // Keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+        // ESC key to minimize
+        if (e.key === 'Escape' && isExpanded) {
+            toggleView();
+        }
+
+        // Cmd+R to refresh
+        if ((e.metaKey || e.ctrlKey) && e.key === 'r') {
+            e.preventDefault();
+            if (currentProjectData) {
+                loadProjectData(currentProjectData.project.id);
+            } else {
+                loadFirstAvailableProject();
+            }
+        }
+
+        // Cmd+P to load first project (for testing)
+        if ((e.metaKey || e.ctrlKey) && e.key === 'p') {
+            e.preventDefault();
+            loadFirstAvailableProject();
+        }
+    });
+
+    // Click outside to minimize (when expanded)
+    document.addEventListener('click', (e) => {
+        const expandedView = document.getElementById('expanded-view');
+        if (isExpanded && !expandedView.contains(e.target)) {
+            toggleView();
+        }
+    });
+}
+
+async function toggleView() {
+    isExpanded = await invoke('toggle_expanded');
+
+    if (isExpanded) {
+        document.getElementById('minimized-view').classList.add('hidden');
+        document.getElementById('expanded-view').classList.remove('hidden');
+    } else {
+        document.getElementById('minimized-view').classList.remove('hidden');
+        document.getElementById('expanded-view').classList.add('hidden');
+    }
+}
+
+function startAutoRefresh() {
+    // Refresh every 5 minutes
+    refreshInterval = setInterval(async () => {
+        if (currentProjectData) {
+            await loadProjectData(currentProjectData.project.id);
+        }
+    }, 5 * 60 * 1000);
+}
+
+function showError(message) {
+    const errorEl = document.getElementById('error-message');
+    const errorText = document.getElementById('error-text');
+
+    errorText.textContent = message;
+    errorEl.classList.remove('hidden');
+
+    // Auto-hide after 10 seconds
+    setTimeout(() => {
+        errorEl.classList.add('hidden');
+    }, 10000);
+}
+
+function escapeHtml(text) {
+    const map = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+    };
+    return text.replace(/[&<>"']/g, m => map[m]);
+}
+
+function updateStatus(message) {
+    const statusElement = document.getElementById('status-message');
+    if (statusElement) {
+        statusElement.textContent = message;
+        console.log(`Status: ${message}`);
+    }
+}
+
+// Listen for project selection from Rust backend
+window.__TAURI__.event.listen('project-selected', async (event) => {
+    await loadProjectData(event.payload.projectId);
+});
+
+// Listen for refresh event from tray menu
+window.__TAURI__.event.listen('refresh-project', async () => {
+    if (currentProjectData) {
+        await loadProjectData(currentProjectData.project.id);
+    } else {
+        await loadFirstAvailableProject();
+    }
+});
