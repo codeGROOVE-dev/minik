@@ -16,6 +16,8 @@ struct AppState {
     hidden_columns: Vec<String>,
     window_x: i32,
     window_y: i32,
+    #[serde(default)]
+    last_column_count: u32,
 }
 
 impl Default for AppState {
@@ -27,6 +29,7 @@ impl Default for AppState {
             hidden_columns: Vec::new(),
             window_x: 100,
             window_y: 50,
+            last_column_count: 5,
         }
     }
 }
@@ -93,7 +96,7 @@ async fn list_org_projects(org: String) -> Result<Vec<Project>, String> {
 }
 
 #[tauri::command]
-async fn project_data(project_id: String) -> Result<ProjectData, String> {
+async fn project_data(project_id: String, state: State<'_, AppStateWrapper>) -> Result<ProjectData, String> {
     log::debug!("Fetching data for project: {}", project_id);
     let client = GitHubClient::new().map_err(|e| {
         log::error!("Failed to create GitHub client: {}", e);
@@ -109,6 +112,9 @@ async fn project_data(project_id: String) -> Result<ProjectData, String> {
     if let Ok(ref data) = result {
         log::info!("Successfully fetched project '{}' with {} columns and {} items",
                   data.project.title, data.columns.len(), data.items.len());
+        // Store the column count for later use
+        let mut app_state = state.0.lock().unwrap();
+        app_state.last_column_count = data.columns.len() as u32;
     }
     result
 }
@@ -119,25 +125,59 @@ fn toggle_expanded(state: State<AppStateWrapper>, app_handle: AppHandle) -> Resu
     let mut app_state = state.0.lock().unwrap();
     app_state.is_expanded = !app_state.is_expanded;
     let is_expanded = app_state.is_expanded;
-    log::info!("Window expanded state changed to: {}", is_expanded);
+    let column_count = app_state.last_column_count;
+    log::info!("Window expanded state changed to: {}, columns: {}", is_expanded, column_count);
 
     if let Some(window) = app_handle.get_webview_window("main") {
         if is_expanded {
-            let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
-                width: 800,
-                height: 600,
+            // Calculate dynamic width based on column count
+            // Using Logical size instead of Physical to handle HiDPI displays correctly
+            let column_width = 240; // Width per column
+            let padding = 40; // Total padding
+            let gap = 12; // Gap between columns
+            let width = padding + (column_width * column_count) + (gap * column_count.saturating_sub(1));
+            let width = width.min(1600).max(800); // Clamp between 800 and 1600
+
+            log::info!("Setting expanded window size to {}x600 for {} columns", width, column_count);
+            let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
+                width: width as f64,
+                height: 600.0,
             }));
             let _ = window.set_resizable(true);
         } else {
-            let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
-                width: 400,
-                height: 60,
+            // Increased width to show all column badges properly
+            let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
+                width: 600.0,  // Increased from 400 to accommodate column badges
+                height: 60.0,
             }));
             let _ = window.set_resizable(false);
         }
     }
 
     Ok(is_expanded)
+}
+
+#[tauri::command]
+fn resize_window_for_columns(column_count: u32, app_handle: AppHandle) -> Result<(), String> {
+    log::debug!("Resizing window for {} columns", column_count);
+
+    if let Some(window) = app_handle.get_webview_window("main") {
+        // Calculate width: base padding + (column width * count) + gaps
+        // Using Logical size to handle HiDPI displays correctly
+        let column_width = 240; // Width per column
+        let padding = 40; // Total padding
+        let gap = 12; // Gap between columns
+        let width = padding + (column_width * column_count) + (gap * (column_count - 1).max(0));
+        let width = width.min(1600).max(800); // Clamp between 800 and 1600
+
+        let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
+            width: width as f64,
+            height: 600.0,  // Keep height reasonable
+        }));
+        log::info!("Window resized to {} x 600 for {} columns", width, column_count);
+    }
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -260,6 +300,7 @@ pub fn run() {
             list_org_projects,
             project_data,
             toggle_expanded,
+            resize_window_for_columns,
             select_project,
             current_project,
             toggle_my_items,

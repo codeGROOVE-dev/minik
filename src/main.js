@@ -175,23 +175,25 @@ function renderExpandedView() {
         const colorClass = `column-${COLUMN_COLORS[index % COLUMN_COLORS.length]}`;
         const items = currentProjectData.items.filter(item => item.column_id === column.id);
 
-        const cardsHtml = items.map(item => `
-            <div class="kanban-card" data-url="${item.url || '#'}">
-                <div class="card-title">${escapeHtml(item.title)}</div>
-                <div class="card-meta">
-                    ${item.assignees.length > 0 ? `
-                        <div class="card-assignees">
-                            ${item.assignees.map(a => `<span class="assignee">@${escapeHtml(a)}</span>`).join('')}
-                        </div>
-                    ` : ''}
-                    ${item.labels.length > 0 ? `
-                        <div class="card-labels">
-                            ${item.labels.map(l => `<span class="label">${escapeHtml(l)}</span>`).join('')}
+        const cardsHtml = items.map(item => {
+            const hasMetadata = item.assignees.length > 0 || item.labels.length > 0;
+            return `
+                <div class="kanban-card" data-url="${item.url || '#'}">
+                    <div class="card-title">${escapeHtml(item.title)}</div>
+                    ${hasMetadata ? `
+                        <div class="card-meta">
+                            ${item.assignees.length > 0 ?
+                                item.assignees.slice(0, 2).map(a => `<span class="assignee">@${escapeHtml(a)}</span>`).join('') +
+                                (item.assignees.length > 2 ? `<span class="assignee">+${item.assignees.length - 2}</span>` : '')
+                            : ''}
+                            ${item.labels.length > 0 ?
+                                item.labels.slice(0, 3).map(l => `<span class="label">${escapeHtml(l)}</span>`).join('')
+                            : ''}
                         </div>
                     ` : ''}
                 </div>
-            </div>
-        `).join('');
+            `;
+        }).join('');
 
         return `
             <div class="kanban-column ${colorClass}">
@@ -200,7 +202,7 @@ function renderExpandedView() {
                     <span class="column-count-badge">${items.length}</span>
                 </div>
                 <div class="column-cards">
-                    ${cardsHtml || '<div style="color: #999; font-size: 11px;">No items</div>'}
+                    ${cardsHtml || '<div class="column-empty">No items</div>'}
                 </div>
             </div>
         `;
@@ -277,6 +279,20 @@ async function toggleView() {
     if (isExpanded) {
         document.getElementById('minimized-view').classList.add('hidden');
         document.getElementById('expanded-view').classList.remove('hidden');
+
+        // Resize window based on column count
+        if (currentProjectData && currentProjectData.columns) {
+            const hiddenColumns = currentProjectData.hiddenColumns || [];
+            const visibleColumns = currentProjectData.columns.filter(
+                col => !hiddenColumns.includes(col.id)
+            );
+            console.log(`Resizing window for ${visibleColumns.length} columns`);
+            try {
+                await invoke('resize_window_for_columns', { columnCount: visibleColumns.length });
+            } catch (error) {
+                console.error('Failed to resize window:', error);
+            }
+        }
     } else {
         document.getElementById('minimized-view').classList.remove('hidden');
         document.getElementById('expanded-view').classList.add('hidden');

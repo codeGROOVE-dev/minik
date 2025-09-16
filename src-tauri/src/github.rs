@@ -244,18 +244,23 @@ impl GitHubClient {
             if let Some(first_view) = views.first() {
                 if let Some(fields) = first_view["fields"]["nodes"].as_array() {
                     for field in fields {
-                        if let Some(options) = field["options"].as_array() {
-                            let field_id = field["id"].as_str().unwrap_or_default();
-                            for option in options {
-                                let option_id = option["id"].as_str().unwrap_or_default().to_string();
-                                let option_name = option["name"].as_str().unwrap_or_default().to_string();
-                                column_map.insert(option_id.clone(), (field_id.to_string(), option_name.clone()));
-                                columns.push(ProjectColumn {
-                                    id: option_id.clone(),
-                                    name: option_name.clone(),
-                                    items_count: 0,
-                                });
-                                trace!("  Column: {} - {}", option_name, option_id);
+                        let field_name = field["name"].as_str().unwrap_or_default();
+                        debug!("Found field: {}", field_name);
+                        // Only process the Status field for Kanban columns
+                        if field_name == "Status" {
+                            if let Some(options) = field["options"].as_array() {
+                                let field_id = field["id"].as_str().unwrap_or_default();
+                                for option in options {
+                                    let option_id = option["id"].as_str().unwrap_or_default().to_string();
+                                    let option_name = option["name"].as_str().unwrap_or_default().to_string();
+                                    column_map.insert(option_id.clone(), (field_id.to_string(), option_name.clone()));
+                                    columns.push(ProjectColumn {
+                                        id: option_id.clone(),
+                                        name: option_name.clone(),
+                                        items_count: 0,
+                                    });
+                                    trace!("  Column: {} - {}", option_name, option_id);
+                                }
                             }
                         }
                     }
