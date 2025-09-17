@@ -179,16 +179,16 @@ fn toggle_expanded(state: State<AppStateWrapper>, app_handle: AppHandle) -> Resu
         if is_expanded {
             // Calculate dynamic width based on column count
             // Using Logical size instead of Physical to handle HiDPI displays correctly
-            let column_width = 240; // Width per column
-            let padding = 40; // Total padding
-            let gap = 12; // Gap between columns
+            let column_width = 190; // Width per column
+            let padding = 12; // Total padding (bare minimum)
+            let gap = 4; // Gap between columns (bare minimum)
             let width = padding + (column_width * column_count) + (gap * column_count.saturating_sub(1));
-            let width = width.min(1600).max(800); // Clamp between 800 and 1600
+            let width = width.min(1200).max(600); // Clamp between 600 and 1200
 
-            log::info!("Setting expanded window size to {}x600 for {} columns", width, column_count);
+            log::info!("Setting expanded window size to {}x480 for {} columns", width, column_count);
             let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
                 width: width as f64,
-                height: 600.0,
+                height: 480.0,
             }));
             let _ = window.set_resizable(true);
         } else {
@@ -211,17 +211,17 @@ fn resize_window_for_columns(column_count: u32, app_handle: AppHandle) -> Result
     if let Some(window) = app_handle.get_webview_window("main") {
         // Calculate width: base padding + (column width * count) + gaps
         // Using Logical size to handle HiDPI displays correctly
-        let column_width = 240; // Width per column
-        let padding = 40; // Total padding
-        let gap = 12; // Gap between columns
+        let column_width = 190; // Width per column
+        let padding = 12; // Total padding (bare minimum)
+        let gap = 4; // Gap between columns (bare minimum)
         let width = padding + (column_width * column_count) + (gap * (column_count - 1).max(0));
-        let width = width.min(1600).max(800); // Clamp between 800 and 1600
+        let width = width.min(1200).max(600); // Clamp between 600 and 1200
 
         let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
             width: width as f64,
-            height: 600.0,  // Keep height reasonable
+            height: 480.0,  // Compact height
         }));
-        log::info!("Window resized to {} x 600 for {} columns", width, column_count);
+        log::info!("Window resized to {} x 480 for {} columns", width, column_count);
     }
 
     Ok(())
