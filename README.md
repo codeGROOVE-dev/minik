@@ -2,7 +2,14 @@
 
 Native GitHub Kanban boards but tiny. Like _really_ tiny.
 
-![minik screenshot](media/minik.png)
+Here's the maximized view:
+
+![minik screenshot](media/maximized.png)
+
+Similar to the macOS Stickies app, here's the minimized view you can see by double-clicking on it:
+
+![minik screenshot](media/minimized.png)
+
 
 ## What
 
@@ -11,8 +18,6 @@ Inspired by the macOS Stickies app, it's a floating Kanban for your GitHub proje
 - **Minimalist**: Collapses to a tiny strip when you don't need it
 - **Always on top**: Stay on task
 - **Native**: Built with Rust & Tauri
-
-It's only been tested on macOS, but it should work anywhere.
 
 ## Features
 
@@ -29,11 +34,13 @@ It's only been tested on macOS, but it should work anywhere.
 gh auth login
 cargo install tauri-cli
 
-# Run it
-git clone https://github.com/tstromberg/minik
+# Install it to /Applications
+git clone https://github.com/codeGROOVE-dev/minik
 cd minik
-cargo tauri dev
+make install
 ```
+
+It's only been tested on macOS, but it should work anywhere.
 
 ## Why "minik"?
 
