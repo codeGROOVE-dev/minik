@@ -1,34 +1,50 @@
 # minik
 
-GitHub kanban boards but tiny. Like really tiny.
+Native GitHub Kanban boards but tiny. Like _really_ tiny.
 
-## What is this
+![minik screenshot](media/minik.png)
 
-A native app that shows your GitHub project boards in a minimalist floating window. Think macOS Stickies but for GitHub projects. Built with Tauri because why not.
+## What
 
-## Status
+Inspired by the macOS Stickies app, it's a floating Kanban for your GitHub project boards.
 
-🔥 **Extremely broken and experimental** 🔥
+- **Minimalist**: Collapses to a tiny strip when you don't need it
+- **Always on top**: Stay on task
+- **Native**: Built with Rust & Tauri
 
-This barely works. Sometimes it doesn't. Features are half-implemented or completely missing. The code is a mess. You've been warned.
+It's only been tested on macOS, but it should work anywhere.
 
-## Building
+## Features
 
-Assuming you're brave enough:
+- ✅ Minimized/expanded views
+- ✅ Column visibility toggles
+- ✅ Drag & drop items between columns
+- ✅ Click through to GitHub issues/PRs
+- ✅ Uses your existing `gh` CLI auth
+
+## Quick Start
 
 ```bash
+# Prerequisites: Rust + GitHub CLI
+gh auth login
 cargo install tauri-cli
+
+# Run it
+git clone https://github.com/tstromberg/minik
+cd minik
 cargo tauri dev
 ```
 
-## Why "minik"
+## Why "minik"?
 
-It's supposed to be mini. The k is for kanban. Or maybe I just can't spell.
+Mini + kanban = minik.
 
-## Contributing
+I get distracted easily so I needed something to keep me on task.
 
-Don't. Seriously, wait until this actually does something useful first.
+## Status
+
+Works better than expected, breaks less than feared. Still rough around the edges but genuinely useful for daily project tracking.
 
 ## License
 
-MIT (but honestly there's nothing worth licensing yet)
+Apache

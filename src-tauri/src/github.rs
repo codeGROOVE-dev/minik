@@ -41,6 +41,7 @@ pub struct ProjectData {
     pub columns: Vec<ProjectColumn>,
     pub items: Vec<ProjectItem>,
     pub status_field_id: String,
+    pub hidden_columns: Vec<String>,
 }
 
 pub struct GitHubClient {
@@ -336,6 +337,7 @@ impl GitHubClient {
             columns,
             items,
             status_field_id,
+            hidden_columns: Vec::new(), // Will be populated by the caller
         })
     }
 

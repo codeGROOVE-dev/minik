@@ -25,7 +25,28 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "capabilities": [
+        {
+          "identifier": "main-capability",
+          "description": "Capability for the main window",
+          "remote": {
+            "urls": ["https://tauri.localhost"]
+          },
+          "local": true,
+          "windows": ["main"],
+          "permissions": [
+            "shell:allow-open",
+            "core:window:allow-start-dragging",
+            "core:window:default"
+          ]
+        }
+      ]
+    }
+  },
+  "plugins": {
+    "shell": {
+      "open": true
     }
   },
   "bundle": {

@@ -338,3 +338,221 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(0, 0, 0, 0.3);
 }
+
+/* Project Selector Modal */
+.project-selector-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  pointer-events: auto;
+}
+
+.project-selector-content {
+  background: #fff;
+  border-radius: 8px;
+  padding: 20px;
+  max-width: 500px;
+  max-height: 80vh;
+  overflow-y: auto;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  font-family: "SF Pro Text", "Inter", -apple-system, sans-serif;
+}
+
+.project-selector-content h3 {
+  margin: 0 0 16px 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: #333;
+}
+
+.project-list {
+  max-height: 400px;
+  overflow-y: auto;
+  margin-bottom: 16px;
+}
+
+.org-section {
+  margin-bottom: 16px;
+}
+
+.org-section h4 {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #666;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 4px;
+}
+
+.project-item {
+  margin-bottom: 4px;
+  padding: 6px 0;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.project-item:hover {
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 4px;
+  padding-left: 4px;
+}
+
+.project-item input[type="radio"] {
+  margin-right: 8px;
+}
+
+.project-item label {
+  font-size: 13px;
+  cursor: pointer;
+  flex: 1;
+}
+
+.modal-buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.modal-buttons button {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.select-btn {
+  background: #007AFF;
+  color: white;
+}
+
+.select-btn:hover {
+  background: #0056CC;
+}
+
+.cancel-btn {
+  background: #f0f0f0;
+  color: #333;
+}
+
+.cancel-btn:hover {
+  background: #e0e0e0;
+}
+
+/* Context Menu Styles */
+.context-menu {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10001;
+  pointer-events: auto;
+}
+
+.context-menu-content {
+  background: #fff;
+  border-radius: 8px;
+  padding: 8px 0;
+  min-width: 200px;
+  max-width: 400px;
+  min-height: 150px;
+  max-height: 80vh;
+  overflow-y: auto;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  font-family: "SF Pro Text", "Inter", -apple-system, sans-serif;
+  position: relative;
+}
+
+.context-menu-title {
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #333;
+  border-bottom: 1px solid #eee;
+  margin-bottom: 4px;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.context-menu-title[style*="cursor: pointer"]:hover {
+  background-color: #f0f0f0;
+  color: #007AFF;
+}
+
+.context-menu-section {
+  margin-bottom: 8px;
+}
+
+.context-menu-org-title {
+  padding: 6px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #666;
+  background: #f8f8f8;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.context-menu-item {
+  padding: 6px 16px;
+  font-size: 13px;
+  cursor: pointer;
+  color: #333;
+  transition: background-color 0.15s;
+}
+
+.context-menu-item:hover {
+  background: #f0f0f0;
+}
+
+.context-menu-checkbox-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.context-menu-checkbox-item input[type="checkbox"] {
+  margin: 0;
+}
+
+.context-menu-checkbox-item label {
+  cursor: pointer;
+  flex: 1;
+}
+
+/* Dummy column message */
+.dummy-message {
+  padding: 12px;
+  text-align: center;
+  color: rgba(0, 0, 0, 0.5);
+  font-size: 11px;
+  font-style: italic;
+  background: rgba(255, 255, 255, 0.6);
+  border-radius: 4px;
+  margin: 4px;
+}
+
+/* Expandable context menu items */
+.context-menu-expandable {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.context-menu-expandable:hover {
+  background: #f0f0f0;
+}

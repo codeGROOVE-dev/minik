@@ -4,7 +4,7 @@ mod logging;
 use github::{GitHubClient, Organization, Project, ProjectData};
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
-use tauri::{Manager, State, AppHandle, WindowEvent, Emitter};
+use tauri::{Manager, State, AppHandle, WindowEvent, Emitter, PhysicalPosition};
 use tauri::menu::{MenuItemBuilder, SubmenuBuilder, Menu};
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -19,6 +19,8 @@ struct AppState {
     last_column_count: u32,
     #[serde(default)]
     status_field_id: String,
+    #[serde(default)]
+    project_column_settings: std::collections::HashMap<String, Vec<String>>, // project_id -> hidden columns
 }
 
 impl Default for AppState {
@@ -32,6 +34,7 @@ impl Default for AppState {
             window_y: 50,
             last_column_count: 5,
             status_field_id: String::new(),
+            project_column_settings: std::collections::HashMap::new(),
         }
     }
 }
@@ -104,27 +107,34 @@ async fn project_data(project_id: String, state: State<'_, AppStateWrapper>, app
         log::error!("Failed to create GitHub client: {}", e);
         e.to_string()
     })?;
-    let result = client
+    let mut result = client
         .project_data(&project_id)
         .await
         .map_err(|e| {
             log::error!("Failed to fetch project data for {}: {}", project_id, e);
             e.to_string()
-        });
-    if let Ok(ref data) = result {
-        log::info!("Successfully fetched project '{}' with {} columns and {} items",
-                  data.project.title, data.columns.len(), data.items.len());
-        // Store the column count and field ID for later use
-        let mut app_state = state.0.lock().unwrap();
-        app_state.last_column_count = data.columns.len() as u32;
-        app_state.status_field_id = data.status_field_id.clone();
+        })?;
 
-        // Update the hide columns menu dynamically
-        if let Err(e) = update_column_menu(&app_handle, &data.columns, &app_state.hidden_columns) {
-            log::error!("Failed to update column menu: {}", e);
-        }
+    // Add the hidden columns information from the current state
+    {
+        let app_state = state.0.lock().unwrap();
+        result.hidden_columns = app_state.hidden_columns.clone();
     }
-    result
+
+    log::info!("Successfully fetched project '{}' with {} columns and {} items",
+              result.project.title, result.columns.len(), result.items.len());
+
+    // Store the column count and field ID for later use
+    let mut app_state = state.0.lock().unwrap();
+    app_state.last_column_count = result.columns.len() as u32;
+    app_state.status_field_id = result.status_field_id.clone();
+
+    // Update the hide columns menu dynamically
+    if let Err(e) = update_column_menu(&app_handle, &result.columns, &app_state.hidden_columns) {
+        log::error!("Failed to update column menu: {}", e);
+    }
+
+    Ok(result)
 }
 
 #[tauri::command]
@@ -257,11 +267,31 @@ fn resize_window_with_height(column_count: u32, height: u32, app_handle: AppHand
 }
 
 #[tauri::command]
-fn select_project(project_id: String, state: State<AppStateWrapper>) -> Result<(), String> {
+fn select_project(project_id: String, state: State<AppStateWrapper>, app_handle: AppHandle) -> Result<(), String> {
     log::info!("Selecting project: {}", project_id);
     let mut app_state = state.0.lock().unwrap();
+    let old_project = app_state.selected_project_id.clone();
+
+    // Save current project's hidden columns
+    if let Some(old_id) = old_project {
+        let hidden_cols = app_state.hidden_columns.clone();
+        app_state.project_column_settings.insert(old_id, hidden_cols);
+    }
+
+    // Load new project's hidden columns
     app_state.selected_project_id = Some(project_id.clone());
+    app_state.hidden_columns = app_state.project_column_settings
+        .get(&project_id)
+        .cloned()
+        .unwrap_or_default();
+
     save_state(&app_state);
+
+    // Emit event to reload project data
+    if let Some(window) = app_handle.get_webview_window("main") {
+        let _ = window.emit("project-changed", project_id.clone());
+    }
+
     log::debug!("Project {} selected and state saved", project_id);
     Ok(())
 }
@@ -281,15 +311,24 @@ fn toggle_my_items(state: State<AppStateWrapper>) -> Result<bool, String> {
 }
 
 #[tauri::command]
-fn toggle_column_visibility(column_id: String, state: State<AppStateWrapper>) -> Result<(), String> {
+fn toggle_column_visibility(column_id: String, state: State<AppStateWrapper>) -> Result<bool, String> {
     let mut app_state = state.0.lock().unwrap();
-    if let Some(index) = app_state.hidden_columns.iter().position(|c| c == &column_id) {
+    let is_visible = if let Some(index) = app_state.hidden_columns.iter().position(|c| c == &column_id) {
         app_state.hidden_columns.remove(index);
+        true
     } else {
-        app_state.hidden_columns.push(column_id);
+        app_state.hidden_columns.push(column_id.clone());
+        false
+    };
+
+    // Also update the project-specific settings
+    let hidden_cols = app_state.hidden_columns.clone();
+    if let Some(project_id) = app_state.selected_project_id.clone() {
+        app_state.project_column_settings.insert(project_id, hidden_cols);
     }
+
     save_state(&app_state);
-    Ok(())
+    Ok(is_visible)
 }
 
 #[tauri::command]
@@ -381,6 +420,72 @@ fn load_state() -> AppState {
     AppState::default()
 }
 
+// Command to update project menu dynamically
+#[tauri::command]
+async fn update_project_menu(app_handle: AppHandle) -> Result<(), String> {
+    log::debug!("Updating project menu");
+    rebuild_project_menu(&app_handle).await?;
+    Ok(())
+}
+
+// Command to update columns menu dynamically
+#[tauri::command]
+async fn update_columns_menu(columns: Vec<github::ProjectColumn>, app_handle: AppHandle) -> Result<(), String> {
+    log::debug!("Updating columns menu with {} columns", columns.len());
+    rebuild_columns_menu(&app_handle, columns)?;
+    Ok(())
+}
+
+// Context menu commands
+#[tauri::command]
+async fn show_project_context_menu(app_handle: AppHandle) -> Result<(), String> {
+    log::debug!("Showing project context menu");
+
+    // Get organizations and projects to build the context menu
+    let orgs = list_organizations().await.map_err(|e| format!("Failed to get organizations: {}", e))?;
+
+    if let Some(window) = app_handle.get_webview_window("main") {
+        let _ = window.emit("show-project-context-menu", orgs);
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn show_column_context_menu(project_id: String, app_handle: AppHandle, state: State<'_, AppStateWrapper>) -> Result<(), String> {
+    log::debug!("Showing column context menu for project: {}", project_id);
+
+    // Get project data to build the context menu
+    let project_data = project_data(project_id.clone(), state, app_handle.clone()).await?;
+
+    if let Some(window) = app_handle.get_webview_window("main") {
+        let _ = window.emit("show-column-context-menu", (project_id, project_data.columns));
+    }
+
+    Ok(())
+}
+
+async fn rebuild_project_menu<R: tauri::Runtime>(app_handle: &AppHandle<R>) -> Result<(), String> {
+    // For now, we'll emit events to the frontend to handle project selection
+    // Dynamic menu updates in Tauri v2 are complex and require rebuilding the entire menu
+    log::info!("Project menu update requested - using frontend modal instead");
+    if let Some(window) = app_handle.get_webview_window("main") {
+        let _ = window.emit("show-project-selector", ());
+    }
+    Ok(())
+}
+
+fn rebuild_columns_menu<R: tauri::Runtime>(
+    app_handle: &AppHandle<R>,
+    columns: Vec<github::ProjectColumn>,
+) -> Result<(), String> {
+    // Store columns data for frontend use
+    if let Some(window) = app_handle.get_webview_window("main") {
+        let _ = window.emit("columns-updated", columns);
+    }
+    Ok(())
+}
+
 fn setup_app_menu<R: tauri::Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::Error>> {
     use tauri::menu::{PredefinedMenuItem, CheckMenuItem};
 
@@ -413,14 +518,29 @@ fn setup_app_menu<R: tauri::Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<
         .item(&toggle_expanded)
         .build()?;
 
-    // Create Project menu
-    let select_project = MenuItemBuilder::new("Select Project...")
-        .id("select-project")
-        .accelerator("CmdOrCtrl+P")
+    // Create simple Project menu (context menu will handle project selection)
+    let current_project = MenuItemBuilder::new("No project selected")
+        .id("current-project")
+        .enabled(false)
+        .build(app)?;
+    let select_project = MenuItemBuilder::new("Right-click to select project")
+        .id("select-project-help")
+        .enabled(false)
         .build(app)?;
 
     let project_menu = SubmenuBuilder::new(app, "Project")
+        .item(&current_project)
         .item(&select_project)
+        .build()?;
+
+    // Create simple Columns menu (dynamic context menus will handle column toggles)
+    let columns_help = MenuItemBuilder::new("Right-click columns to show/hide")
+        .id("columns-help")
+        .enabled(false)
+        .build(app)?;
+
+    let columns_menu = SubmenuBuilder::new(app, "Columns")
+        .item(&columns_help)
         .build()?;
 
     // Build main menu
@@ -457,6 +577,7 @@ fn setup_app_menu<R: tauri::Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<
             &edit_menu,
             &view_menu,
             &project_menu,
+            &columns_menu,
             &window_menu,
         ])?;
 
@@ -514,9 +635,28 @@ fn setup_app_menu<R: tauri::Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<
                     let _ = window.emit("menu-select-project", ());
                 }
             }
+            id if id.starts_with("project-") => {
+                log::info!("Project selected: {}", id);
+                let project_id = id.strip_prefix("project-").unwrap_or("").to_string();
+                if let Some(window) = app_handle.get_webview_window("main") {
+                    let _ = window.emit("menu-project-selected", project_id);
+                }
+            }
+            "columns-show-all" => {
+                log::info!("Show all columns selected");
+                if let Some(window) = app_handle.get_webview_window("main") {
+                    let _ = window.emit("menu-columns-show-all", ());
+                }
+            }
+            "columns-hide-all" => {
+                log::info!("Hide all columns selected");
+                if let Some(window) = app_handle.get_webview_window("main") {
+                    let _ = window.emit("menu-columns-hide-all", ());
+                }
+            }
             id if id.starts_with("column-") => {
                 log::info!("Column visibility toggle: {}", id);
-                let column_id = id.strip_prefix("column-").unwrap_or("");
+                let column_id = id.strip_prefix("column-").unwrap_or("").to_string();
                 if let Some(window) = app_handle.get_webview_window("main") {
                     let _ = window.emit("menu-toggle-column", column_id);
                 }
@@ -570,6 +710,10 @@ pub fn run() {
             hidden_columns,
             show_only_my_items,
             current_user,
+            update_project_menu,
+            update_columns_menu,
+            show_project_context_menu,
+            show_column_context_menu,
         ])
         .setup(|app| {
             let _app_handle = app.handle().clone();
@@ -579,7 +723,17 @@ pub fn run() {
 
             let window = app.get_webview_window("main").unwrap();
 
-            window.on_window_event(|event| {
+            // Restore window position from state
+            if let Some(state_wrapper) = app.try_state::<AppStateWrapper>() {
+                let app_state = state_wrapper.0.lock().unwrap();
+                if app_state.window_x != 100 || app_state.window_y != 50 {
+                    let _ = window.set_position(PhysicalPosition::new(app_state.window_x, app_state.window_y));
+                    log::info!("Restored window position to ({}, {})", app_state.window_x, app_state.window_y);
+                }
+            }
+
+            let app_handle_clone = app.handle().clone();
+            window.on_window_event(move |event| {
                 match event {
                     WindowEvent::Focused(false) => {
                         log::debug!("Window lost focus");
@@ -592,6 +746,13 @@ pub fn run() {
                     }
                     WindowEvent::Moved(position) => {
                         log::debug!("Window moved to: {:?}", position);
+                        // Save window position
+                        if let Some(state_wrapper) = app_handle_clone.try_state::<AppStateWrapper>() {
+                            let mut app_state = state_wrapper.0.lock().unwrap();
+                            app_state.window_x = position.x;
+                            app_state.window_y = position.y;
+                            save_state(&app_state);
+                        }
                     }
                     _ => {
                         log::trace!("Window event: {:?}", event);

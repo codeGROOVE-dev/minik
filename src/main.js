@@ -20,6 +20,8 @@ let dragOffset = { x: 0, y: 0 };
 let originalParent = null;
 let currentUsername = null;
 let showOnlyMyItems = false;
+let currentColumns = [];
+let availableProjects = {}; // org -> projects map
 
 const COLUMN_COLORS = ['yellow', 'blue', 'green', 'pink', 'orange', 'purple'];
 
@@ -248,6 +250,22 @@ function renderExpandedView() {
     const visibleColumns = currentProjectData.columns.filter(
         col => !hiddenColumns.includes(col.id)
     );
+
+    // If no columns are visible, show a dummy column
+    if (visibleColumns.length === 0) {
+        board.innerHTML = `
+            <div class="kanban-column column-yellow dummy-column">
+                <div class="column-header">
+                    <span class="column-title">All columns are hidden</span>
+                    <span class="column-count-badge">!</span>
+                </div>
+                <div class="column-cards">
+                    <div class="dummy-message">Right-click to show columns</div>
+                </div>
+            </div>
+        `;
+        return;
+    }
 
     const columnsHtml = visibleColumns.map((column, index) => {
         const colorClass = `column-${COLUMN_COLORS[index % COLUMN_COLORS.length]}`;
@@ -512,6 +530,9 @@ function setupEventListeners() {
     // Setup menu event listeners
     setupMenuListeners();
 
+    // Setup context menu event listeners
+    setupContextMenuListeners();
+
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
         // ESC key to minimize
@@ -645,6 +666,304 @@ function setupMenuListeners() {
             renderProject();
         }
     });
+}
+
+function setupContextMenuListeners() {
+    // Check if Tauri event API is available
+    if (!window.__TAURI__ || !window.__TAURI__.event) {
+        console.warn('Tauri event API not available, skipping context menu listeners');
+        return;
+    }
+
+    const { listen } = window.__TAURI__.event;
+
+    // Listen for project context menu data
+    listen('show-project-context-menu', (event) => {
+        console.log('Project context menu data received', event.payload);
+        const organizations = event.payload;
+        showProjectContextMenu(organizations);
+    });
+
+    // Listen for column context menu data
+    listen('show-column-context-menu', (event) => {
+        console.log('Column context menu data received', event.payload);
+        const [projectId, columns] = event.payload;
+        showColumnContextMenu(projectId, columns);
+    });
+
+    // Add right-click handlers to the app - unified context menu from anywhere
+    document.addEventListener('contextmenu', async (e) => {
+        e.preventDefault(); // Prevent default context menu
+
+        // Show unified context menu from anywhere in the app
+        console.log('Right-clicked - showing unified context menu');
+        await showUnifiedContextMenu();
+    });
+}
+
+async function showProjectContextMenu(organizations) {
+    // Create dynamic context menu for projects
+    const menu = document.createElement('div');
+    menu.className = 'context-menu';
+    menu.innerHTML = '<div class="context-menu-content"></div>';
+
+    const content = menu.querySelector('.context-menu-content');
+
+    // Add title
+    const title = document.createElement('div');
+    title.className = 'context-menu-title';
+    title.textContent = 'Select Project';
+    content.appendChild(title);
+
+    // Fetch projects for all organizations first, then filter out orgs without projects
+    for (const org of organizations) {
+        try {
+            const projects = await invoke('list_org_projects', { org: org.login });
+
+            // Only add organization section if it has projects
+            if (projects && projects.length > 0) {
+                const orgSection = document.createElement('div');
+                orgSection.className = 'context-menu-section';
+
+                const orgTitle = document.createElement('div');
+                orgTitle.className = 'context-menu-org-title';
+                orgTitle.textContent = org.login;
+                orgSection.appendChild(orgTitle);
+
+                // Add projects for this organization
+                projects.forEach(project => {
+                    const projectItem = document.createElement('div');
+                    projectItem.className = 'context-menu-item';
+                    projectItem.textContent = project.title;
+                    projectItem.addEventListener('click', async () => {
+                        console.log('Selected project:', project.id);
+                        await invoke('select_project', { projectId: project.id });
+                        await loadProjectData(project.id);
+                        removeContextMenu();
+                    });
+                    orgSection.appendChild(projectItem);
+                });
+
+                content.appendChild(orgSection);
+            }
+        } catch (error) {
+            console.warn(`Failed to fetch projects for org ${org.login}:`, error);
+            // Skip organizations where we can't fetch projects
+        }
+    }
+
+    // Position and show menu
+    document.body.appendChild(menu);
+
+    // Remove menu when clicking outside
+    setTimeout(() => {
+        document.addEventListener('click', removeContextMenu, { once: true });
+    }, 100);
+}
+
+async function showColumnContextMenu(projectId, columns) {
+    // Create dynamic context menu for column visibility
+    const menu = document.createElement('div');
+    menu.className = 'context-menu';
+    menu.innerHTML = '<div class="context-menu-content"></div>';
+
+    const content = menu.querySelector('.context-menu-content');
+
+    // Add title
+    const title = document.createElement('div');
+    title.className = 'context-menu-title';
+    title.textContent = 'Show/Hide Columns';
+    content.appendChild(title);
+
+    // Get current hidden columns
+    try {
+        const hiddenColumns = await invoke('hidden_columns');
+
+        columns.forEach(column => {
+            const columnItem = document.createElement('div');
+            columnItem.className = 'context-menu-item context-menu-checkbox-item';
+
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.checked = !hiddenColumns.includes(column.id);
+            checkbox.id = `column-${column.id}`;
+
+            const label = document.createElement('label');
+            label.htmlFor = `column-${column.id}`;
+            label.textContent = column.name;
+
+            columnItem.appendChild(checkbox);
+            columnItem.appendChild(label);
+
+            columnItem.addEventListener('click', async (e) => {
+                // Prevent event propagation to avoid closing menu
+                e.stopPropagation();
+
+                if (e.target.type !== 'checkbox') {
+                    checkbox.checked = !checkbox.checked;
+                }
+
+                console.log('Toggling column visibility:', column.id, checkbox.checked);
+
+                try {
+                    const isVisible = await invoke('toggle_column_visibility', { columnId: column.id });
+
+                    // Update the local currentProjectData with the new hidden columns state
+                    if (currentProjectData) {
+                        // Get the updated hidden columns list from the backend
+                        const updatedHiddenColumns = await invoke('hidden_columns');
+                        currentProjectData.hiddenColumns = updatedHiddenColumns;
+
+                        // Re-render the project to reflect changes
+                        renderProject();
+                    }
+                } catch (error) {
+                    console.error('Failed to toggle column visibility:', error);
+                }
+            });
+
+            content.appendChild(columnItem);
+        });
+    } catch (error) {
+        console.error('Failed to get hidden columns:', error);
+    }
+
+    // Position and show menu
+    document.body.appendChild(menu);
+
+    // Remove menu when clicking outside
+    setTimeout(() => {
+        document.addEventListener('click', removeContextMenu, { once: true });
+    }, 100);
+}
+
+function showAppContextMenu() {
+    // Create main context menu with both options
+    const menu = document.createElement('div');
+    menu.className = 'context-menu';
+    menu.innerHTML = '<div class="context-menu-content"></div>';
+
+    const content = menu.querySelector('.context-menu-content');
+
+    // Add title
+    const title = document.createElement('div');
+    title.className = 'context-menu-title';
+    title.textContent = 'Minik';
+    content.appendChild(title);
+
+    // Add project selection option
+    const projectItem = document.createElement('div');
+    projectItem.className = 'context-menu-item';
+    projectItem.textContent = 'Select Project...';
+    projectItem.addEventListener('click', async () => {
+        removeContextMenu();
+        await invoke('show_project_context_menu');
+    });
+    content.appendChild(projectItem);
+
+    // Add column visibility option (only if project is loaded)
+    if (currentProjectData) {
+        const columnItem = document.createElement('div');
+        columnItem.className = 'context-menu-item';
+        columnItem.textContent = 'Show/Hide Columns...';
+        columnItem.addEventListener('click', async () => {
+            removeContextMenu();
+            await invoke('show_column_context_menu', { projectId: currentProjectData.project.id });
+        });
+        content.appendChild(columnItem);
+    }
+
+    // Position and show menu
+    document.body.appendChild(menu);
+
+    // Remove menu when clicking outside
+    setTimeout(() => {
+        document.addEventListener('click', removeContextMenu, { once: true });
+    }, 100);
+}
+
+async function showUnifiedContextMenu() {
+    // Create unified context menu with submenus
+    console.log('Creating unified context menu');
+    console.log('Current project data available:', !!currentProjectData);
+    console.log('Is expanded:', isExpanded);
+    if (currentProjectData) {
+        console.log('Project title:', currentProjectData.project.title);
+    }
+
+    const menu = document.createElement('div');
+    menu.className = 'context-menu';
+    menu.innerHTML = '<div class="context-menu-content"></div>';
+
+    const content = menu.querySelector('.context-menu-content');
+
+    // Add title - show current project name or "Minik" if no project
+    const title = document.createElement('div');
+    title.className = 'context-menu-title';
+
+    if (currentProjectData) {
+        title.textContent = currentProjectData.project.title;
+        title.style.cursor = 'pointer';
+        title.addEventListener('click', () => {
+            console.log('Project title clicked');
+            console.log('Current project data:', currentProjectData);
+            console.log('Project URL:', currentProjectData.project.url);
+            console.log('Open function available:', typeof open);
+            if (currentProjectData.project.url) {
+                try {
+                    console.log('Attempting to open URL:', currentProjectData.project.url);
+                    open(currentProjectData.project.url);
+                    console.log('Open function called successfully');
+                    removeContextMenu();
+                } catch (error) {
+                    console.error('Error opening URL:', error);
+                }
+            } else {
+                console.log('No URL available to open');
+            }
+        });
+    } else {
+        title.textContent = 'Minik';
+    }
+
+    content.appendChild(title);
+
+    // Add Projects submenu
+    const projectsItem = document.createElement('div');
+    projectsItem.className = 'context-menu-item context-menu-expandable';
+    projectsItem.innerHTML = 'Projects <span style="float: right;">›</span>';
+    projectsItem.addEventListener('click', async () => {
+        removeContextMenu();
+        await invoke('show_project_context_menu');
+    });
+    content.appendChild(projectsItem);
+
+    // Add Columns submenu (only if project is loaded)
+    if (currentProjectData) {
+        const columnsItem = document.createElement('div');
+        columnsItem.className = 'context-menu-item context-menu-expandable';
+        columnsItem.innerHTML = 'Columns <span style="float: right;">›</span>';
+        columnsItem.addEventListener('click', async () => {
+            removeContextMenu();
+            await invoke('show_column_context_menu', { projectId: currentProjectData.project.id });
+        });
+        content.appendChild(columnsItem);
+    }
+
+    // Position and show menu
+    document.body.appendChild(menu);
+
+    // Remove menu when clicking outside
+    setTimeout(() => {
+        document.addEventListener('click', removeContextMenu, { once: true });
+    }, 100);
+}
+
+function removeContextMenu() {
+    const existing = document.querySelector('.context-menu');
+    if (existing) {
+        existing.remove();
+    }
 }
 
 async function showProjectSelector() {
