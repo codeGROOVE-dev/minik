@@ -3,11 +3,13 @@
 //! This module provides a client for fetching GitHub organization projects
 //! and their associated data using both REST and GraphQL APIs.
 
-use anyhow::{Context, Result};
-use log::{debug, error, info, trace};
+use anyhow::{Context as _, Result};
+use backoff::{Error as BackoffError, ExponentialBackoff};
+use log::{debug, error, info, trace, warn};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::process::Command;
+use std::time::Duration;
 
 /// Represents a GitHub organization
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,6 +87,18 @@ pub struct GitHubClient {
     token: String,
 }
 
+/// Create an exponential backoff configuration with jitter
+fn create_backoff() -> ExponentialBackoff {
+    ExponentialBackoff {
+        initial_interval: Duration::from_millis(1000),
+        randomization_factor: 0.5, // Add jitter
+        multiplier: 2.0,
+        max_interval: Duration::from_secs(30),
+        max_elapsed_time: Some(Duration::from_secs(120)), // Max 2 minutes total
+        ..Default::default()
+    }
+}
+
 /// Find the gh CLI command in common locations
 fn find_gh_command() -> Result<String> {
     const POSSIBLE_PATHS: &[&str] = &[
@@ -143,25 +157,53 @@ impl GitHubClient {
         debug!("Fetching organizations from GitHub API");
 
         let client = reqwest::Client::new();
-        let response = client
-            .get("https://api.github.com/user/orgs")
-            .header("Authorization", format!("Bearer {}", self.token))
-            .header("User-Agent", "Minik-Kanban-App")
-            .send()
-            .await
-            .context("Failed to send request to GitHub API")?;
+        let token = self.token.clone();
 
-        let status = response.status();
-        if !status.is_success() {
-            let error_body = response.text().await?;
-            error!("GitHub API returned error status: {} - {}", status, error_body);
-            anyhow::bail!("Failed to fetch organizations: {}", status);
-        }
+        let operation = || async {
+            let response = client
+                .get("https://api.github.com/user/orgs")
+                .header("Authorization", format!("Bearer {}", token))
+                .header("User-Agent", "Minik-Kanban-App")
+                .timeout(Duration::from_secs(30))
+                .send()
+                .await
+                .map_err(|e| {
+                    warn!("Request failed: {}", e);
+                    BackoffError::transient(anyhow::anyhow!("Request failed: {}", e))
+                })?;
 
-        let orgs: Vec<Organization> = response
-            .json()
-            .await
-            .context("Failed to parse organizations response")?;
+            let status = response.status();
+
+            // Retry on rate limits or server errors
+            if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+                let error_body = response.text().await.unwrap_or_default();
+                warn!("GitHub API returned retryable status {}: {}", status, error_body);
+                return Err(BackoffError::transient(anyhow::anyhow!(
+                    "Retryable status {}: {}",
+                    status,
+                    error_body
+                )));
+            }
+
+            if !status.is_success() {
+                let error_body = response.text().await.unwrap_or_default();
+                error!("GitHub API returned error status: {} - {}", status, error_body);
+                return Err(BackoffError::permanent(anyhow::anyhow!(
+                    "Failed to fetch organizations: {}",
+                    status
+                )));
+            }
+
+            response
+                .json::<Vec<Organization>>()
+                .await
+                .map_err(|e| {
+                    error!("Failed to parse organizations response: {}", e);
+                    BackoffError::permanent(e.into())
+                })
+        };
+
+        let orgs = backoff::future::retry(create_backoff(), operation).await?;
 
         info!("Successfully fetched {} organizations", orgs.len());
         for org in &orgs {
@@ -175,7 +217,7 @@ impl GitHubClient {
     pub async fn list_org_projects(&self, org: &str) -> Result<Vec<Project>> {
         debug!("Fetching projects for organization: {}", org);
 
-        const QUERY: &str = r#"
+        const QUERY: &str = "
         query($org: String!) {
             organization(login: $org) {
                 projectsV2(first: 100) {
@@ -188,7 +230,7 @@ impl GitHubClient {
                 }
             }
         }
-        "#;
+        ";
 
         let variables = serde_json::json!({ "org": org });
         let response = self.graphql_request(QUERY, variables).await?;
@@ -220,7 +262,7 @@ impl GitHubClient {
     pub async fn project_data(&self, project_id: &str) -> Result<ProjectData> {
         info!("Fetching detailed data for project ID: {}", project_id);
 
-        const QUERY: &str = r#"
+        const QUERY: &str = "
         query($projectId: ID!) {
             node(id: $projectId) {
                 ... on ProjectV2 {
@@ -294,7 +336,7 @@ impl GitHubClient {
                 }
             }
         }
-        "#;
+        ";
 
         let variables = serde_json::json!({ "projectId": project_id });
         let response = self.graphql_request(QUERY, variables).await?;
@@ -481,7 +523,7 @@ impl GitHubClient {
         info!("Option ID (Column): {}", option_id);
         info!("=================================");
 
-        const MUTATION: &str = r#"
+        const MUTATION: &str = "
         mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: ProjectV2FieldValue!) {
             updateProjectV2ItemFieldValue(input: {
                 projectId: $projectId
@@ -494,7 +536,7 @@ impl GitHubClient {
                 }
             }
         }
-        "#;
+        ";
 
         let variables = serde_json::json!({
             "projectId": project_id,
@@ -553,42 +595,85 @@ impl GitHubClient {
         );
 
         let client = reqwest::Client::new();
-        info!("🚀 Sending HTTP POST request to GitHub GraphQL API...");
-
+        let token = self.token.clone();
         let request_body = serde_json::json!({
             "query": query,
             "variables": variables
         });
 
-        let response = client
-            .post("https://api.github.com/graphql")
-            .header("Authorization", format!("Bearer {}", self.token))
-            .header("User-Agent", "Minik-Kanban-App")
-            .json(&request_body)
-            .send()
-            .await
-            .context("Failed to send GraphQL request")?;
+        let operation = || async {
+            info!("🚀 Sending HTTP POST request to GitHub GraphQL API...");
 
-        let status = response.status();
-        info!("📨 Response received! Status: {}", status);
+            let response = client
+                .post("https://api.github.com/graphql")
+                .header("Authorization", format!("Bearer {}", token))
+                .header("User-Agent", "Minik-Kanban-App")
+                .json(&request_body)
+                .timeout(Duration::from_secs(30))
+                .send()
+                .await
+                .map_err(|e| {
+                    warn!("GraphQL request failed: {}", e);
+                    BackoffError::transient(anyhow::anyhow!("GraphQL request failed: {}", e))
+                })?;
 
-        if !status.is_success() {
-            let error_text = response.text().await?;
-            error!("GraphQL request failed with status {}: {}", status, error_text);
-            anyhow::bail!("GraphQL request failed: {}", error_text);
-        }
+            let status = response.status();
+            info!("📨 Response received! Status: {}", status);
 
-        let data: serde_json::Value = response
-            .json()
-            .await
-            .context("Failed to parse GraphQL response")?;
-
-        if let Some(errors) = data["errors"].as_array() {
-            if !errors.is_empty() {
-                error!("GraphQL response contains errors: {:?}", errors);
-                anyhow::bail!("GraphQL errors: {:?}", errors);
+            // Retry on rate limits or server errors
+            if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+                let error_text = response.text().await.unwrap_or_default();
+                warn!("GraphQL returned retryable status {}: {}", status, error_text);
+                return Err(BackoffError::transient(anyhow::anyhow!(
+                    "Retryable GraphQL status {}: {}",
+                    status,
+                    error_text
+                )));
             }
-        }
+
+            if !status.is_success() {
+                let error_text = response.text().await.unwrap_or_default();
+                error!("GraphQL request failed with status {}: {}", status, error_text);
+                return Err(BackoffError::permanent(anyhow::anyhow!(
+                    "GraphQL request failed: {}",
+                    error_text
+                )));
+            }
+
+            let data: serde_json::Value = response
+                .json()
+                .await
+                .map_err(|e| {
+                    error!("Failed to parse GraphQL response: {}", e);
+                    BackoffError::permanent(e.into())
+                })?;
+
+            // Check for GraphQL errors in response
+            if let Some(errors) = data["errors"].as_array() {
+                if !errors.is_empty() {
+                    // Some GraphQL errors might be transient (e.g., timeout)
+                    let error_msg = format!("GraphQL errors: {:?}", errors);
+
+                    // Check if any error mentions rate limiting or timeouts
+                    let is_transient = errors.iter().any(|e| {
+                        let msg = e.to_string().to_lowercase();
+                        msg.contains("timeout") || msg.contains("rate") || msg.contains("limit")
+                    });
+
+                    if is_transient {
+                        warn!("GraphQL response contains transient errors: {:?}", errors);
+                        return Err(BackoffError::transient(anyhow::anyhow!(error_msg)));
+                    }
+
+                    error!("GraphQL response contains errors: {:?}", errors);
+                    return Err(BackoffError::permanent(anyhow::anyhow!(error_msg)));
+                }
+            }
+
+            Ok(data)
+        };
+
+        let data = backoff::future::retry(create_backoff(), operation).await?;
 
         trace!("GraphQL request successful");
         Ok(data)

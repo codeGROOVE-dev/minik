@@ -80,9 +80,32 @@ logs:
 release:
 	cd src-tauri && cargo run --release
 
-# Run linting
+# Run strict linting
 lint:
-	cd src-tauri && cargo clippy -- -D warnings
+	cd src-tauri && cargo clippy -- \
+		-D warnings \
+		-D clippy::all \
+		-D clippy::pedantic \
+		-D clippy::nursery \
+		-D clippy::cargo \
+		-W clippy::restriction \
+		-A clippy::module_name_repetitions \
+		-A clippy::must_use_candidate \
+		-A clippy::missing_docs_in_private_items \
+		-A clippy::implicit_return \
+		-A clippy::missing_inline_in_public_items \
+		-A clippy::question_mark_used \
+		-A clippy::absolute_paths \
+		-A clippy::min_ident_chars \
+		-A clippy::shadow_reuse \
+		-A clippy::shadow_unrelated \
+		-A clippy::missing_trait_methods \
+		-A clippy::single_call_fn \
+		-A clippy::pub_use \
+		-A clippy::mod_module_files \
+		-A clippy::implicit_hasher \
+		-A clippy::blanket_clippy_restriction_lints
+	cd src-tauri && cargo fmt -- --check
 
 # Run tests
 test:
