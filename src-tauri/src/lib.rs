@@ -5,8 +5,7 @@ use github::{GitHubClient, Organization, Project, ProjectData};
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use tauri::{Manager, State, AppHandle, WindowEvent, Emitter};
-use tauri::tray::{TrayIconBuilder, MouseButton, MouseButtonState, TrayIconEvent};
-use tauri::menu::{MenuBuilder, MenuItemBuilder};
+use tauri::menu::{MenuItemBuilder, SubmenuBuilder, Menu};
 
 #[derive(Serialize, Deserialize, Clone)]
 struct AppState {
@@ -99,7 +98,7 @@ async fn list_org_projects(org: String) -> Result<Vec<Project>, String> {
 }
 
 #[tauri::command]
-async fn project_data(project_id: String, state: State<'_, AppStateWrapper>) -> Result<ProjectData, String> {
+async fn project_data(project_id: String, state: State<'_, AppStateWrapper>, app_handle: AppHandle) -> Result<ProjectData, String> {
     log::debug!("Fetching data for project: {}", project_id);
     let client = GitHubClient::new().map_err(|e| {
         log::error!("Failed to create GitHub client: {}", e);
@@ -119,6 +118,11 @@ async fn project_data(project_id: String, state: State<'_, AppStateWrapper>) -> 
         let mut app_state = state.0.lock().unwrap();
         app_state.last_column_count = data.columns.len() as u32;
         app_state.status_field_id = data.status_field_id.clone();
+
+        // Update the hide columns menu dynamically
+        if let Err(e) = update_column_menu(&app_handle, &data.columns, &app_state.hidden_columns) {
+            log::error!("Failed to update column menu: {}", e);
+        }
     }
     result
 }
@@ -294,6 +298,12 @@ fn hidden_columns(state: State<AppStateWrapper>) -> Vec<String> {
     app_state.hidden_columns.clone()
 }
 
+#[tauri::command]
+fn show_only_my_items(state: State<AppStateWrapper>) -> bool {
+    let app_state = state.0.lock().unwrap();
+    app_state.show_only_my_items
+}
+
 fn save_state(state: &AppState) {
     log::debug!("Saving application state");
     match serde_json::to_string(state) {
@@ -352,6 +362,164 @@ fn load_state() -> AppState {
     AppState::default()
 }
 
+fn setup_app_menu<R: tauri::Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::Error>> {
+    use tauri::menu::{PredefinedMenuItem, CheckMenuItem};
+
+    // Create View menu items
+    let refresh = MenuItemBuilder::new("Refresh Project")
+        .id("refresh")
+        .accelerator("CmdOrCtrl+R")
+        .build(app)?;
+
+    let toggle_my_items = CheckMenuItem::new(
+        app,
+        "Show Only My Items",
+        true,
+        false,
+        Some("CmdOrCtrl+M"),
+    )?;
+
+    let toggle_expanded = MenuItemBuilder::new("Toggle Expanded View")
+        .id("toggle-expanded")
+        .accelerator("CmdOrCtrl+E")
+        .build(app)?;
+
+
+    // Create View menu
+    let view_menu = SubmenuBuilder::new(app, "View")
+        .item(&refresh)
+        .separator()
+        .item(&toggle_my_items)
+        .item(&toggle_expanded)
+        .build()?;
+
+    // Create Project menu
+    let select_project = MenuItemBuilder::new("Select Project...")
+        .id("select-project")
+        .accelerator("CmdOrCtrl+P")
+        .build(app)?;
+
+    let project_menu = SubmenuBuilder::new(app, "Project")
+        .item(&select_project)
+        .build()?;
+
+    // Build main menu
+    #[cfg(target_os = "macos")]
+    {
+        let app_menu = SubmenuBuilder::new(app, "Minik")
+            .item(&PredefinedMenuItem::about(app, Some("Minik"), None)?)
+            .separator()
+            .item(&PredefinedMenuItem::services(app, None)?)
+            .separator()
+            .item(&PredefinedMenuItem::hide(app, None)?)
+            .item(&PredefinedMenuItem::hide_others(app, None)?)
+            .item(&PredefinedMenuItem::show_all(app, None)?)
+            .separator()
+            .item(&PredefinedMenuItem::quit(app, None)?)
+            .build()?;
+
+        let edit_menu = SubmenuBuilder::new(app, "Edit")
+            .item(&PredefinedMenuItem::undo(app, None)?)
+            .item(&PredefinedMenuItem::redo(app, None)?)
+            .separator()
+            .item(&PredefinedMenuItem::cut(app, None)?)
+            .item(&PredefinedMenuItem::copy(app, None)?)
+            .item(&PredefinedMenuItem::paste(app, None)?)
+            .item(&PredefinedMenuItem::select_all(app, None)?)
+            .build()?;
+
+        let window_menu = SubmenuBuilder::new(app, "Window")
+            .item(&PredefinedMenuItem::minimize(app, None)?)
+            .build()?;
+
+        let menu = Menu::with_items(app, &[
+            &app_menu,
+            &edit_menu,
+            &view_menu,
+            &project_menu,
+            &window_menu,
+        ])?;
+
+        app.set_menu(menu)?;
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let file_menu = SubmenuBuilder::new(app, "File")
+            .item(&PredefinedMenuItem::quit(app, None)?)
+            .build()?;
+
+        let edit_menu = SubmenuBuilder::new(app, "Edit")
+            .item(&PredefinedMenuItem::cut(app)?)
+            .item(&PredefinedMenuItem::copy(app)?)
+            .item(&PredefinedMenuItem::paste(app)?)
+            .build()?;
+
+        let menu = Menu::with_items(app, &[
+            &file_menu,
+            &edit_menu,
+            &view_menu,
+            &project_menu,
+        ])?;
+
+        app.set_menu(menu)?;
+    }
+
+    // Set up menu event handler
+    app.on_menu_event(move |app_handle, event| {
+        log::debug!("Menu event: {:?}", event.id());
+
+        match event.id().as_ref() {
+            "refresh" => {
+                log::info!("Refresh menu item selected");
+                if let Some(window) = app_handle.get_webview_window("main") {
+                    let _ = window.emit("menu-refresh", ());
+                }
+            }
+            "toggle-my-items" => {
+                log::info!("Toggle my items menu item selected");
+                if let Some(window) = app_handle.get_webview_window("main") {
+                    let _ = window.emit("menu-toggle-my-items", ());
+                }
+            }
+            "toggle-expanded" => {
+                log::info!("Toggle expanded menu item selected");
+                if let Some(window) = app_handle.get_webview_window("main") {
+                    let _ = window.emit("menu-toggle-expanded", ());
+                }
+            }
+            "select-project" => {
+                log::info!("Select project menu item selected");
+                if let Some(window) = app_handle.get_webview_window("main") {
+                    let _ = window.emit("menu-select-project", ());
+                }
+            }
+            id if id.starts_with("column-") => {
+                log::info!("Column visibility toggle: {}", id);
+                let column_id = id.strip_prefix("column-").unwrap_or("");
+                if let Some(window) = app_handle.get_webview_window("main") {
+                    let _ = window.emit("menu-toggle-column", column_id);
+                }
+            }
+            _ => {}
+        }
+    });
+
+    Ok(())
+}
+
+fn update_column_menu<R: tauri::Runtime>(
+    app_handle: &AppHandle<R>,
+    columns: &[crate::github::ProjectColumn],
+    hidden_columns: &[String],
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Column menu dynamic update is complex in Tauri v2
+    // For now, we'll skip dynamic menu updates
+    // The column visibility can still be toggled through state
+    log::debug!("Column menu update skipped (not yet implemented)");
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Initialize logging first
@@ -380,79 +548,13 @@ pub fn run() {
             toggle_my_items,
             toggle_column_visibility,
             hidden_columns,
+            show_only_my_items,
         ])
         .setup(|app| {
-            let app_handle = app.handle().clone();
+            let _app_handle = app.handle().clone();
 
-            // Create the tray menu
-            let quit = MenuItemBuilder::new("Quit")
-                .id("quit")
-                .build(app)?;
-
-            let _separator = MenuItemBuilder::new("---")
-                .id("separator")
-                .enabled(false)
-                .build(app)?;
-
-            let refresh = MenuItemBuilder::new("Refresh")
-                .id("refresh")
-                .build(app)?;
-
-            let show_window = MenuItemBuilder::new("Show Window")
-                .id("show")
-                .build(app)?;
-
-            let menu = MenuBuilder::new(app)
-                .item(&show_window)
-                .item(&refresh)
-                .separator()
-                .item(&quit)
-                .build()?;
-
-            let _tray = TrayIconBuilder::new()
-                .tooltip("Minik - GitHub Kanban")
-                .menu(&menu)
-                .on_menu_event(move |app_handle, event| {
-                    match event.id.as_ref() {
-                        "quit" => {
-                            log::info!("Quit menu item selected");
-                            app_handle.exit(0);
-                        }
-                        "refresh" => {
-                            log::info!("Refresh menu item selected");
-                            // Emit event to frontend to refresh
-                            if let Some(window) = app_handle.get_webview_window("main") {
-                                let _ = window.emit("refresh-project", serde_json::json!({}));
-                            }
-                        }
-                        "show" => {
-                            log::info!("Show window menu item selected");
-                            if let Some(window) = app_handle.get_webview_window("main") {
-                                let _ = window.show();
-                                let _ = window.set_focus();
-                            }
-                        }
-                        _ => {
-                            log::debug!("Unknown menu item: {:?}", event.id);
-                        }
-                    }
-                })
-                .on_tray_icon_event(move |_tray, event| {
-                    match event {
-                        TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } => {
-                            log::debug!("Left click on tray icon");
-                            // Show the window on tray icon click
-                            if let Some(window) = app_handle.get_webview_window("main") {
-                                let _ = window.show();
-                                let _ = window.set_focus();
-                            }
-                        }
-                        _ => {
-                            log::trace!("Tray icon event: {:?}", event);
-                        }
-                    }
-                })
-                .build(app)?;
+            // Build the application menu
+            setup_app_menu(app)?;
 
             let window = app.get_webview_window("main").unwrap();
 

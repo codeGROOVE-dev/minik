@@ -473,6 +473,9 @@ function setupEventListeners() {
         document.getElementById('error-message').classList.add('hidden');
     });
 
+    // Setup menu event listeners
+    setupMenuListeners();
+
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
         // ESC key to minimize
@@ -562,6 +565,130 @@ function updateStatus(message) {
     }
 }
 
+function setupMenuListeners() {
+    // Check if Tauri event API is available
+    if (!window.__TAURI__ || !window.__TAURI__.event) {
+        console.warn('Tauri event API not available, skipping menu listeners');
+        return;
+    }
+
+    const { listen } = window.__TAURI__.event;
+
+    // Listen for menu refresh event
+    listen('menu-refresh', async () => {
+        console.log('Menu refresh triggered');
+        if (currentProjectData) {
+            await refreshProject();
+        }
+    });
+
+    // Listen for menu toggle my items event
+    listen('menu-toggle-my-items', async () => {
+        console.log('Menu toggle my items triggered');
+        await toggleMyItems();
+    });
+
+    // Listen for menu toggle expanded view event
+    listen('menu-toggle-expanded', () => {
+        console.log('Menu toggle expanded triggered');
+        toggleView();
+    });
+
+    // Listen for menu select project event
+    listen('menu-select-project', async () => {
+        console.log('Menu select project triggered');
+        await showProjectSelector();
+    });
+
+    // Listen for menu toggle column visibility event
+    listen('menu-toggle-column', async (event) => {
+        console.log('Menu toggle column triggered', event.payload);
+        const columnId = event.payload;
+        await invoke('toggle_column_visibility', { columnId });
+        if (currentProjectData) {
+            renderProject();
+        }
+    });
+}
+
+async function showProjectSelector() {
+    try {
+        // Create a simple project selector dialog
+        const orgs = await invoke('list_organizations');
+        if (!orgs || orgs.length === 0) {
+            showError('No GitHub organizations found');
+            return;
+        }
+
+        // Build HTML for project selector
+        let projectOptions = [];
+        for (const org of orgs) {
+            const projects = await invoke('list_org_projects', { org: org.login });
+            if (projects && projects.length > 0) {
+                projects.forEach(project => {
+                    projectOptions.push({
+                        id: project.id,
+                        name: `${org.login} / ${project.title}`,
+                        org: org.login,
+                        title: project.title
+                    });
+                });
+            }
+        }
+
+        if (projectOptions.length === 0) {
+            showError('No projects found in any organization');
+            return;
+        }
+
+        // Create a simple selection dialog
+        const projectList = projectOptions.map((p, index) =>
+            `${index + 1}. ${p.name}`
+        ).join('\n');
+
+        // For now, we'll use a simple prompt - in production you'd want a proper dialog
+        const selection = prompt(`Select a project by number:\n\n${projectList}`);
+
+        if (selection) {
+            const index = parseInt(selection) - 1;
+            if (index >= 0 && index < projectOptions.length) {
+                const selected = projectOptions[index];
+                await invoke('select_project', { projectId: selected.id });
+                await loadProjectData(selected.id);
+            }
+        }
+    } catch (error) {
+        console.error('Failed to show project selector:', error);
+        showError(`Failed to load projects: ${error}`);
+    }
+}
+
+async function toggleMyItems() {
+    try {
+        const newState = await invoke('toggle_my_items');
+        console.log('My items filter toggled to:', newState);
+        if (currentProjectData) {
+            renderProject();
+        }
+    } catch (error) {
+        console.error('Failed to toggle my items filter:', error);
+    }
+}
+
+async function refreshProject() {
+    if (!currentProjectData) return;
+
+    try {
+        console.log('Refreshing project data...');
+        updateStatus('Refreshing project...');
+        await loadProjectData(currentProjectData.project.id);
+        updateStatus('Project refreshed');
+    } catch (error) {
+        console.error('Failed to refresh project:', error);
+        showError(`Failed to refresh project: ${error}`);
+    }
+}
+
 function setupWindowDragging() {
     console.log('Setting up window dragging for frameless window...');
 
@@ -639,11 +766,29 @@ window.__TAURI__.event.listen('project-selected', async (event) => {
     await loadProjectData(event.payload.projectId);
 });
 
-// Listen for refresh event from tray menu
-window.__TAURI__.event.listen('refresh-project', async () => {
+// Listen for menu events
+window.__TAURI__.event.listen('menu-refresh', async () => {
     if (currentProjectData) {
         await loadProjectData(currentProjectData.project.id);
     } else {
         await loadFirstAvailableProject();
     }
+});
+
+window.__TAURI__.event.listen('menu-toggle-my-items', async () => {
+    const showOnlyMyItems = await invoke('toggle_my_items');
+    console.log(`Show only my items: ${showOnlyMyItems}`);
+    // Re-render the view with the filter applied
+    if (currentProjectData) {
+        renderProject();
+    }
+});
+
+window.__TAURI__.event.listen('menu-toggle-expanded', async () => {
+    await toggleView();
+});
+
+window.__TAURI__.event.listen('menu-select-project', async () => {
+    // Show project selection dialog
+    await showProjectSelector();
 });
