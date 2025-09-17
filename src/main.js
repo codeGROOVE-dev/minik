@@ -567,16 +567,7 @@ function renderExpandedView() {
 }
 
 function setupEventListeners() {
-    // Double-click to toggle view on both minimized and expanded views
-    document.getElementById('minimized-view').addEventListener('dblclick', toggleView);
-    document.getElementById('expanded-view').addEventListener('dblclick', (e) => {
-        // Only toggle if not clicking on interactive elements
-        if (!e.target.closest('.kanban-card') &&
-            !e.target.closest('.control-btn') &&
-            !e.target.closest('button')) {
-            toggleView();
-        }
-    });
+    // Note: Double-click handling is now managed by the window dragging system
 
     // Note: Minimize and refresh buttons removed from UI
 
@@ -770,6 +761,8 @@ function setupMenuListeners() {
         console.log('Menu toggle column triggered', event.payload);
         const columnId = event.payload;
         await invoke('toggle_column_visibility', { columnId });
+        // Remove any context menu that might be open
+        removeContextMenu();
         if (currentProjectData) {
             renderProject();
         }
@@ -943,6 +936,9 @@ async function showColumnContextMenu(projectId, columns) {
                 try {
                     const isVisible = await invoke('toggle_column_visibility', { columnId: column.id });
 
+                    // Remove the context menu first to prevent artifacts
+                    removeContextMenu();
+
                     // Update the local currentProjectData with the new hidden columns state
                     if (currentProjectData) {
                         // Get the updated hidden columns list from the backend
@@ -954,6 +950,8 @@ async function showColumnContextMenu(projectId, columns) {
                     }
                 } catch (error) {
                     console.error('Failed to toggle column visibility:', error);
+                    // Remove menu on error too
+                    removeContextMenu();
                 }
             });
 
@@ -1334,54 +1332,65 @@ function setupWindowDragging() {
                 return;
             }
 
-            // Helper function to start dragging with delay to not interfere with double-clicks
-            let dragTimer = null;
-            const startDragging = async (e) => {
+            // Simple and reliable click tracking for double-click vs drag detection
+            let clickCount = 0;
+            let lastClickTime = 0;
+            let clickTimer = null;
+
+            const handleClick = async (e) => {
                 // Don't interfere with card dragging
                 if (isDragging || e.target.closest('.kanban-card')) {
                     return;
                 }
 
-                if (e.button === 0) { // Left mouse button
-                    // Clear any existing drag timer
-                    if (dragTimer) {
-                        clearTimeout(dragTimer);
-                        dragTimer = null;
-                    }
+                if (e.button !== 0) return; // Only handle left mouse button
 
-                    // Delay drag to allow double-click to take precedence
-                    dragTimer = setTimeout(async () => {
+                const now = Date.now();
+                const timeDiff = now - lastClickTime;
+
+                // Reset click count if too much time has passed (500ms)
+                if (timeDiff > 500) {
+                    clickCount = 0;
+                }
+
+                clickCount++;
+                lastClickTime = now;
+
+                // Clear any existing timer
+                if (clickTimer) {
+                    clearTimeout(clickTimer);
+                    clickTimer = null;
+                }
+
+                if (clickCount === 1) {
+                    // Single click - wait to see if a second click comes
+                    clickTimer = setTimeout(async () => {
+                        // No second click came, start dragging
                         try {
-                            console.log('Starting window drag...');
-                            // Use Tauri v2 API structure
+                            console.log('Single click detected - starting window drag...');
                             const { getCurrentWindow } = window.__TAURI__.window;
                             const appWindow = getCurrentWindow();
                             await appWindow.startDragging();
                             console.log('Window drag completed');
                         } catch (error) {
                             console.error('Failed to start window dragging:', error);
-                            console.error('Error details:', error.message || error);
                         }
-                        dragTimer = null;
-                    }, 200); // 200ms delay to allow double-click detection
+                        clickCount = 0;
+                        clickTimer = null;
+                    }, 300); // Wait 300ms for potential second click
+                } else if (clickCount === 2) {
+                    // Double click detected - toggle view immediately
+                    console.log('Double click detected - toggling view');
+                    clickCount = 0;
+                    toggleView();
                 }
             };
 
-            // Helper function to cancel drag when double-click occurs
-            const cancelDrag = () => {
-                if (dragTimer) {
-                    clearTimeout(dragTimer);
-                    dragTimer = null;
-                    console.log('Drag cancelled due to double-click');
-                }
-            };
-
-            // Make minimized view draggable
+            // Make minimized view handle clicks for both dragging and double-click toggle
             const minimizedView = document.getElementById('minimized-view');
             if (minimizedView) {
-                console.log('Adding drag handler to minimized view');
-                minimizedView.addEventListener('mousedown', startDragging);
-                minimizedView.addEventListener('dblclick', cancelDrag);
+                console.log('Adding click handler to minimized view');
+                minimizedView.addEventListener('mousedown', handleClick);
             }
 
             // Make expanded view draggable via column headers and empty space
@@ -1401,7 +1410,7 @@ function setupWindowDragging() {
                 );
 
                 if (isDragArea) {
-                    await startDragging(e);
+                    await handleClick(e);
                 }
             });
 

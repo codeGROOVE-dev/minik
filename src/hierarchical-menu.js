@@ -495,12 +495,22 @@ function populateColumnsSubmenu(submenu, projectData) {
                     currentData.hiddenColumns = hiddenColumns;
                     window.setCurrentProjectData(currentData);
                 }
+
+                // Remove context menu before re-rendering to prevent artifacts
+                if (window.removeContextMenu) {
+                    await window.removeContextMenu();
+                }
+
                 if (window.renderProject) {
                     window.renderProject();
                 }
             } catch (error) {
                 console.error('Failed to toggle column visibility:', error);
                 checkbox.checked = !checkbox.checked;
+                // Remove menu on error too
+                if (window.removeContextMenu) {
+                    await window.removeContextMenu();
+                }
             }
         });
 
