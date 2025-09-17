@@ -194,10 +194,12 @@ fn toggle_expanded(state: State<AppStateWrapper>, app_handle: AppHandle) -> Resu
             // Calculate dynamic width based on column count
             // Using Logical size instead of Physical to handle HiDPI displays correctly
             let column_width = 190; // Width per column
-            let padding = 12; // Total padding (bare minimum)
-            let gap = 4; // Gap between columns (bare minimum)
+            let padding = 12; // Total padding
+            let gap = 4; // Gap between columns
+
+            // Calculate exact width needed for visible columns
             let width = padding + (column_width * column_count) + (gap * column_count.saturating_sub(1));
-            let width = width.min(1200).max(600); // Clamp between 600 and 1200
+            let width = width.min(1200);
 
             log::info!("Setting expanded window size to {}x480 for {} columns", width, column_count);
             let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
@@ -226,10 +228,12 @@ fn resize_window_for_columns(column_count: u32, app_handle: AppHandle) -> Result
         // Calculate width: base padding + (column width * count) + gaps
         // Using Logical size to handle HiDPI displays correctly
         let column_width = 190; // Width per column
-        let padding = 12; // Total padding (bare minimum)
-        let gap = 4; // Gap between columns (bare minimum)
-        let width = padding + (column_width * column_count) + (gap * (column_count - 1).max(0));
-        let width = width.min(1200).max(600); // Clamp between 600 and 1200
+        let padding = 12; // Total padding
+        let gap = 4; // Gap between columns
+
+        // Calculate exact width needed for visible columns
+        let width = padding + (column_width * column_count) + (gap * column_count.saturating_sub(1));
+        let width = width.min(1200);
 
         let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
             width: width as f64,
@@ -248,10 +252,12 @@ fn resize_window_with_height(column_count: u32, height: u32, app_handle: AppHand
     if let Some(window) = app_handle.get_webview_window("main") {
         // Calculate width: base padding + (column width * count) + gaps
         let column_width = 190; // Width per column
-        let padding = 12; // Total padding (bare minimum)
-        let gap = 4; // Gap between columns (bare minimum)
-        let width = padding + (column_width * column_count) + (gap * (column_count - 1).max(0));
-        let width = width.min(1200).max(600); // Clamp between 600 and 1200
+        let padding = 12; // Total padding
+        let gap = 4; // Gap between columns
+
+        // Calculate exact width needed for visible columns
+        let width = padding + (column_width * column_count) + (gap * column_count.saturating_sub(1));
+        let width = width.min(1200);
 
         // Use the calculated height from JavaScript, but cap it at 480 max
         let final_height = height.min(480);
@@ -261,6 +267,36 @@ fn resize_window_with_height(column_count: u32, height: u32, app_handle: AppHand
             height: final_height as f64,
         }));
         log::info!("Window resized to {} x {} for {} columns", width, final_height, column_count);
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+fn resize_for_context_menu(column_count: u32, show_menu: bool, app_handle: AppHandle) -> Result<(), String> {
+    log::debug!("Resizing for context menu: show={}, columns={}", show_menu, column_count);
+
+    if let Some(window) = app_handle.get_webview_window("main") {
+        let column_width = 190;
+        let padding = 12;
+        let gap = 4;
+
+        // Calculate base width needed for visible columns
+        let content_width = padding + (column_width * column_count) + (gap * column_count.saturating_sub(1));
+
+        // Add extra space for context menu only when shown
+        let width = if show_menu {
+            // Context menus are max 250px wide, add buffer for submenu
+            (content_width + 260).min(1200)
+        } else {
+            content_width.min(1200)
+        };
+
+        let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
+            width: width as f64,
+            height: 480.0,
+        }));
+        log::info!("Window resized to {}x480 (menu: {})", width, show_menu);
     }
 
     Ok(())
@@ -780,6 +816,7 @@ pub fn run() {
             toggle_expanded,
             resize_window_for_columns,
             resize_window_with_height,
+            resize_for_context_menu,
             select_project,
             current_project,
             toggle_my_items,
