@@ -737,7 +737,15 @@ fn setup_app_menu<R: tauri::Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<
             "open-devtools" => {
                 log::info!("Open developer tools menu item selected");
                 if let Some(window) = app_handle.get_webview_window("main") {
-                    window.open_devtools();
+                    #[cfg(debug_assertions)]
+                    {
+                        window.open_devtools();
+                    }
+                    #[cfg(not(debug_assertions))]
+                    {
+                        let _ = window; // Suppress unused variable warning
+                        log::warn!("Devtools not available in release builds");
+                    }
                 }
             }
             "select-project" => {

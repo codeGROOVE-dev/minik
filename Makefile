@@ -25,10 +25,13 @@ build:
 	cargo tauri build
 
 # Build and install to Applications folder
-install: build
-	@echo "Installing Minik.app to /Applications..."
-	@cp -r src-tauri/target/release/bundle/macos/Minik.app /Applications/
-	@echo "✅ Minik installed to /Applications"
+install:
+	@echo "Building and installing minik.app to /Applications..."
+	cargo tauri build --bundles app
+	@cp -r src-tauri/target/release/bundle/macos/minik.app /Applications/
+	@echo "✅ minik installed to /Applications"
+	@echo "🚀 Opening minik..."
+	@open /Applications/minik.app
 
 # Clean build artifacts
 clean:
