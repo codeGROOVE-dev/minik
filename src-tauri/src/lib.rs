@@ -1,3 +1,8 @@
+//! Minik - A minimalist GitHub Kanban application
+//!
+//! This module provides the core functionality for the Minik Tauri application,
+//! including state management, GitHub API integration, and window management.
+
 mod github;
 mod logging;
 
@@ -7,6 +12,7 @@ use std::sync::Mutex;
 use tauri::{Manager, State, AppHandle, WindowEvent, Emitter, PhysicalPosition};
 use tauri::menu::{MenuItemBuilder, SubmenuBuilder, Menu};
 
+/// Application state that persists between sessions
 #[derive(Serialize, Deserialize, Clone)]
 struct AppState {
     selected_project_id: Option<String>,
@@ -39,67 +45,74 @@ impl Default for AppState {
     }
 }
 
+/// Thread-safe wrapper for application state
 struct AppStateWrapper(Mutex<AppState>);
 
+/// Check if GitHub authentication is valid
 #[tauri::command]
 async fn github_token() -> Result<String, String> {
     log::info!("github_token command called from frontend");
     log::debug!("Checking GitHub authentication");
-    let result = GitHubClient::new()
-        .map(|_| "authenticated".to_string())
+
+    GitHubClient::new()
+        .map(|_| {
+            log::info!("GitHub authentication successful");
+            "authenticated".to_string()
+        })
         .map_err(|e| {
             log::error!("GitHub authentication failed: {}", e);
             e.to_string()
-        });
-    if result.is_ok() {
-        log::info!("GitHub authentication successful");
-    }
-    result
+        })
 }
 
+/// List all GitHub organizations the user has access to
 #[tauri::command]
 async fn list_organizations() -> Result<Vec<Organization>, String> {
     log::debug!("Listing GitHub organizations");
+
     let client = GitHubClient::new().map_err(|e| {
         log::error!("Failed to create GitHub client: {}", e);
         e.to_string()
     })?;
+
     let result = client
         .list_organizations()
         .await
         .map_err(|e| {
             log::error!("Failed to list organizations: {}", e);
             e.to_string()
-        });
-    if let Ok(ref orgs) = result {
-        log::info!("Successfully fetched {} organizations", orgs.len());
-        for org in orgs {
-            log::debug!("  Organization: {} (id: {})", org.login, org.id);
-        }
+        })?;
+
+    log::info!("Successfully fetched {} organizations", result.len());
+    for org in &result {
+        log::debug!("  Organization: {} (id: {})", org.login, org.id);
     }
-    result
+    Ok(result)
 }
 
+/// List all projects for a specific organization
 #[tauri::command]
 async fn list_org_projects(org: String) -> Result<Vec<Project>, String> {
     log::debug!("Listing projects for organization: {}", org);
+
     let client = GitHubClient::new().map_err(|e| {
         log::error!("Failed to create GitHub client: {}", e);
         e.to_string()
     })?;
+
     let result = client
         .list_org_projects(&org)
         .await
         .map_err(|e| {
             log::error!("Failed to list projects for org {}: {}", org, e);
             e.to_string()
-        });
-    if let Ok(ref projects) = result {
-        log::info!("Successfully fetched {} projects for org {}", projects.len(), org);
-    }
-    result
+        })?;
+
+    log::info!("Successfully fetched {} projects for org {}", result.len(), org);
+    Ok(result)
 }
 
+/// Fetch detailed data for a specific project
 #[tauri::command]
 async fn project_data(project_id: String, state: State<'_, AppStateWrapper>, app_handle: AppHandle) -> Result<ProjectData, String> {
     log::debug!("Fetching data for project: {}", project_id);
@@ -116,10 +129,7 @@ async fn project_data(project_id: String, state: State<'_, AppStateWrapper>, app
         })?;
 
     // Add the hidden columns information from the current state
-    {
-        let app_state = state.0.lock().unwrap();
-        result.hidden_columns = app_state.hidden_columns.clone();
-    }
+    result.hidden_columns = state.0.lock().unwrap().hidden_columns.clone();
 
     log::info!("Successfully fetched project '{}' with {} columns and {} items",
               result.project.title, result.columns.len(), result.items.len());
@@ -137,6 +147,7 @@ async fn project_data(project_id: String, state: State<'_, AppStateWrapper>, app
     Ok(result)
 }
 
+/// Update an item's column (move it to a different status)
 #[tauri::command]
 async fn update_item_column(project_id: String, item_id: String, column_id: String, state: State<'_, AppStateWrapper>) -> Result<(), String> {
     log::info!("\n🎯🎯🎯 UPDATE_ITEM_COLUMN COMMAND CALLED 🎯🎯🎯");
@@ -144,12 +155,8 @@ async fn update_item_column(project_id: String, item_id: String, column_id: Stri
     log::info!("  Item ID: {}", item_id);
     log::info!("  Target Column ID: {}", column_id);
 
-    let field_id = {
-        let app_state = state.0.lock().unwrap();
-        let field_id = app_state.status_field_id.clone();
-        log::info!("  Retrieved Status Field ID from state: '{}'", field_id);
-        field_id
-    };
+    let field_id = state.0.lock().unwrap().status_field_id.clone();
+    log::info!("  Retrieved Status Field ID from state: '{}'", field_id);
 
     if field_id.is_empty() {
         log::error!("❌ Status field ID is empty! Cannot proceed with update.");
@@ -164,22 +171,19 @@ async fn update_item_column(project_id: String, item_id: String, column_id: Stri
     log::info!("✅ GitHub client created successfully");
 
     log::info!("🚀 Calling update_item_field on GitHub client...");
-    let result = client
+    client
         .update_item_field(&project_id, &item_id, &field_id, &column_id)
-        .await;
-
-    match result {
-        Ok(_) => {
+        .await
+        .map(|_| {
             log::info!("✅✅✅ Successfully updated item column on GitHub!");
-            Ok(())
-        }
-        Err(e) => {
+        })
+        .map_err(|e| {
             log::error!("❌❌❌ Failed to update item column: {}", e);
-            Err(format!("GitHub API error: {}", e))
-        }
-    }
+            format!("GitHub API error: {}", e)
+        })
 }
 
+/// Toggle the expanded state of the window
 #[tauri::command]
 fn toggle_expanded(state: State<AppStateWrapper>, _app_handle: AppHandle) -> Result<bool, String> {
     log::debug!("Toggling window expanded state");
@@ -196,6 +200,7 @@ fn toggle_expanded(state: State<AppStateWrapper>, _app_handle: AppHandle) -> Res
     Ok(is_expanded)
 }
 
+/// Resize the window to fit a specific number of columns
 #[tauri::command]
 fn resize_window_for_columns(column_count: u32, app_handle: AppHandle) -> Result<(), String> {
     log::debug!("Resizing window for {} columns", column_count);
@@ -221,6 +226,7 @@ fn resize_window_for_columns(column_count: u32, app_handle: AppHandle) -> Result
     Ok(())
 }
 
+/// Resize the window with a specific column count and height
 #[tauri::command]
 fn resize_window_with_height(column_count: u32, height: u32, app_handle: AppHandle) -> Result<(), String> {
     log::debug!("Resizing window for {} columns with height {}", column_count, height);
@@ -247,6 +253,7 @@ fn resize_window_with_height(column_count: u32, height: u32, app_handle: AppHand
     Ok(())
 }
 
+/// Resize the window to exact dimensions
 #[tauri::command]
 fn resize_window_to_dimensions(width: u32, height: u32, app_handle: AppHandle) -> Result<(), String> {
     log::debug!("Resizing window to exact dimensions: {}x{}", width, height);
@@ -264,6 +271,7 @@ fn resize_window_to_dimensions(width: u32, height: u32, app_handle: AppHandle) -
 
 
 
+/// Resize the window to accommodate a context menu
 #[tauri::command]
 fn resize_for_context_menu(column_count: u32, show_menu: bool, app_handle: AppHandle) -> Result<(), String> {
     log::debug!("Resizing for context menu: show={}, columns={}", show_menu, column_count);
@@ -294,6 +302,7 @@ fn resize_for_context_menu(column_count: u32, show_menu: bool, app_handle: AppHa
     Ok(())
 }
 
+/// Select a project and update the application state
 #[tauri::command]
 fn select_project(project_id: String, state: State<AppStateWrapper>, app_handle: AppHandle) -> Result<(), String> {
     log::info!("Selecting project: {}", project_id);
@@ -324,12 +333,14 @@ fn select_project(project_id: String, state: State<AppStateWrapper>, app_handle:
     Ok(())
 }
 
+/// Get the currently selected project ID
 #[tauri::command]
 fn current_project(state: State<AppStateWrapper>) -> Option<String> {
     let app_state = state.0.lock().unwrap();
     app_state.selected_project_id.clone()
 }
 
+/// Toggle the "show only my items" filter
 #[tauri::command]
 fn toggle_my_items(state: State<AppStateWrapper>) -> Result<bool, String> {
     let mut app_state = state.0.lock().unwrap();
@@ -338,6 +349,7 @@ fn toggle_my_items(state: State<AppStateWrapper>) -> Result<bool, String> {
     Ok(app_state.show_only_my_items)
 }
 
+/// Toggle the visibility of a specific column
 #[tauri::command]
 fn toggle_column_visibility(column_id: String, state: State<AppStateWrapper>) -> Result<bool, String> {
     let mut app_state = state.0.lock().unwrap();
@@ -359,6 +371,7 @@ fn toggle_column_visibility(column_id: String, state: State<AppStateWrapper>) ->
     Ok(is_visible)
 }
 
+/// Hide a specific column for a project
 #[tauri::command]
 fn hide_column(project_id: String, column_id: String, state: State<AppStateWrapper>) -> Result<(), String> {
     log::info!("Hiding column {} for project {}", column_id, project_id);
@@ -378,6 +391,7 @@ fn hide_column(project_id: String, column_id: String, state: State<AppStateWrapp
     Ok(())
 }
 
+/// Show a previously hidden column for a project
 #[tauri::command]
 fn show_column(project_id: String, column_id: String, state: State<AppStateWrapper>) -> Result<(), String> {
     log::info!("Showing column {} for project {}", column_id, project_id);
@@ -397,18 +411,21 @@ fn show_column(project_id: String, column_id: String, state: State<AppStateWrapp
     Ok(())
 }
 
+/// Get the list of hidden column IDs
 #[tauri::command]
 fn hidden_columns(state: State<AppStateWrapper>) -> Vec<String> {
     let app_state = state.0.lock().unwrap();
     app_state.hidden_columns.clone()
 }
 
+/// Check if the window is in expanded state
 #[tauri::command]
 fn is_expanded(state: State<AppStateWrapper>) -> bool {
     let app_state = state.0.lock().unwrap();
     app_state.is_expanded
 }
 
+/// Check if the "show only my items" filter is active
 #[tauri::command]
 fn show_only_my_items(state: State<AppStateWrapper>) -> bool {
     let app_state = state.0.lock().unwrap();
@@ -417,29 +434,32 @@ fn show_only_my_items(state: State<AppStateWrapper>) -> bool {
 
 /// Find the gh command in common locations
 fn find_gh_command() -> Result<String, String> {
-    let possible_paths = vec![
+    const POSSIBLE_PATHS: &[&str] = &[
         "/opt/homebrew/bin/gh",  // Apple Silicon Homebrew
         "/usr/local/bin/gh",      // Intel Homebrew
         "gh",                      // System PATH
     ];
 
-    for path in &possible_paths {
-        let check = std::process::Command::new(path)
-            .arg("--version")
-            .output();
-
-        if let Ok(output) = check {
-            if output.status.success() {
-                log::debug!("Found gh at: {}", path);
-                return Ok(path.to_string());
-            }
-        }
-    }
-
-    log::error!("Could not find gh CLI in any common location");
-    Err("GitHub CLI (gh) not found. Please install it with 'brew install gh' and authenticate with 'gh auth login'".to_string())
+    POSSIBLE_PATHS
+        .iter()
+        .find(|path| {
+            std::process::Command::new(path)
+                .arg("--version")
+                .output()
+                .map(|output| output.status.success())
+                .unwrap_or(false)
+        })
+        .map(|path| {
+            log::debug!("Found gh at: {}", path);
+            path.to_string()
+        })
+        .ok_or_else(|| {
+            log::error!("Could not find gh CLI in any common location");
+            "GitHub CLI (gh) not found. Please install it with 'brew install gh' and authenticate with 'gh auth login'".to_string()
+        })
 }
 
+/// Get the current GitHub username
 #[tauri::command]
 async fn current_user() -> Result<String, String> {
     log::info!("Fetching current user from GitHub");
@@ -518,7 +538,7 @@ fn load_state() -> AppState {
     AppState::default()
 }
 
-// Command to update project menu dynamically
+/// Update the project menu dynamically
 #[tauri::command]
 async fn update_project_menu(app_handle: AppHandle) -> Result<(), String> {
     log::debug!("Updating project menu");
@@ -526,7 +546,7 @@ async fn update_project_menu(app_handle: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-// Command to update columns menu dynamically
+/// Update the columns menu dynamically with new column data
 #[tauri::command]
 async fn update_columns_menu(columns: Vec<github::ProjectColumn>, app_handle: AppHandle) -> Result<(), String> {
     log::debug!("Updating columns menu with {} columns", columns.len());
@@ -534,7 +554,7 @@ async fn update_columns_menu(columns: Vec<github::ProjectColumn>, app_handle: Ap
     Ok(())
 }
 
-// Context menu commands
+/// Show the project selection context menu
 #[tauri::command]
 async fn show_project_context_menu(app_handle: AppHandle) -> Result<(), String> {
     use futures::future::join_all;
@@ -559,8 +579,8 @@ async fn show_project_context_menu(app_handle: AppHandle) -> Result<(), String> 
         org_projects.into_iter()
             .filter(|(_, projects)| !projects.is_empty())
             .map(|(org_login, projects)| {
-                let project_values: Vec<serde_json::Value> = projects.into_iter()
-                    .map(|p| serde_json::to_value(p).unwrap_or(serde_json::Value::Null))
+                let project_values = projects.into_iter()
+                    .filter_map(|p| serde_json::to_value(p).ok())
                     .collect();
                 (org_login, project_values)
             })
@@ -576,6 +596,7 @@ async fn show_project_context_menu(app_handle: AppHandle) -> Result<(), String> 
     Ok(())
 }
 
+/// Show the column visibility context menu for a specific project
 #[tauri::command]
 async fn show_column_context_menu(project_id: String, app_handle: AppHandle, state: State<'_, AppStateWrapper>) -> Result<(), String> {
     log::debug!("Showing column context menu for project: {}", project_id);
