@@ -17,6 +17,7 @@ Inspired by the macOS Stickies app, it's a floating Kanban for your GitHub proje
 
 - **Minimalist**: Collapses to a tiny strip when you don't need it
 - **Always on top**: Stay on task
+- **Read/write**: drag items to update status
 - **Native**: Built with Rust & Tauri
 
 ## Features
