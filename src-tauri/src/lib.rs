@@ -304,6 +304,25 @@ fn show_only_my_items(state: State<AppStateWrapper>) -> bool {
     app_state.show_only_my_items
 }
 
+#[tauri::command]
+async fn current_user() -> Result<String, String> {
+    log::info!("Fetching current user from GitHub");
+    let output = std::process::Command::new("gh")
+        .args(["api", "user", "--jq", ".login"])
+        .output()
+        .map_err(|e| format!("Failed to execute gh command: {}", e))?;
+
+    if !output.status.success() {
+        let error = String::from_utf8_lossy(&output.stderr);
+        log::error!("Failed to get current user: {}", error);
+        return Err(format!("Failed to get current user: {}", error));
+    }
+
+    let username = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    log::info!("Current GitHub user: {}", username);
+    Ok(username)
+}
+
 fn save_state(state: &AppState) {
     log::debug!("Saving application state");
     match serde_json::to_string(state) {
@@ -371,8 +390,9 @@ fn setup_app_menu<R: tauri::Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<
         .accelerator("CmdOrCtrl+R")
         .build(app)?;
 
-    let toggle_my_items = CheckMenuItem::new(
+    let toggle_my_items = CheckMenuItem::with_id(
         app,
+        "toggle-my-items",
         "Show Only My Items",
         true,
         false,
@@ -509,9 +529,9 @@ fn setup_app_menu<R: tauri::Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<
 }
 
 fn update_column_menu<R: tauri::Runtime>(
-    app_handle: &AppHandle<R>,
-    columns: &[crate::github::ProjectColumn],
-    hidden_columns: &[String],
+    _app_handle: &AppHandle<R>,
+    _columns: &[crate::github::ProjectColumn],
+    _hidden_columns: &[String],
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Column menu dynamic update is complex in Tauri v2
     // For now, we'll skip dynamic menu updates
@@ -549,6 +569,7 @@ pub fn run() {
             toggle_column_visibility,
             hidden_columns,
             show_only_my_items,
+            current_user,
         ])
         .setup(|app| {
             let _app_handle = app.handle().clone();

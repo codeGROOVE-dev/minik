@@ -18,6 +18,8 @@ let isDragging = false;
 let dragElement = null;
 let dragOffset = { x: 0, y: 0 };
 let originalParent = null;
+let currentUsername = null;
+let showOnlyMyItems = false;
 
 const COLUMN_COLORS = ['yellow', 'blue', 'green', 'pink', 'orange', 'purple'];
 
@@ -55,6 +57,22 @@ async function checkAuth() {
     try {
         await invoke('github_token');
         updateStatus('GitHub authenticated successfully');
+
+        // Get current user
+        try {
+            currentUsername = await invoke('current_user');
+            console.log('Current GitHub user:', currentUsername);
+        } catch (error) {
+            console.warn('Failed to get current user:', error);
+        }
+
+        // Get filter state
+        try {
+            showOnlyMyItems = await invoke('show_only_my_items');
+            console.log('Show only my items:', showOnlyMyItems);
+        } catch (error) {
+            console.warn('Failed to get filter state:', error);
+        }
     } catch (error) {
         updateStatus('GitHub authentication failed!');
         showError('GitHub authentication required. Please run "gh auth login" first.');
@@ -161,9 +179,20 @@ function renderMinimizedView() {
 
     const columnsHtml = visibleColumns.map((column, index) => {
         const colorClass = `column-${COLUMN_COLORS[index % COLUMN_COLORS.length]}`;
+
+        // Calculate count based on filter
+        let itemCount = column.items_count;
+        if (showOnlyMyItems && currentUsername) {
+            const items = currentProjectData.items.filter(item =>
+                item.column_id === column.id &&
+                item.assignees && item.assignees.includes(currentUsername)
+            );
+            itemCount = items.length;
+        }
+
         return `
             <span class="column-badge ${colorClass}">
-                ${column.name}: <span class="column-count">${column.items_count}</span>
+                ${column.name}: <span class="column-count">${itemCount}</span>
             </span>
         `;
     }).join('');
@@ -222,7 +251,14 @@ function renderExpandedView() {
 
     const columnsHtml = visibleColumns.map((column, index) => {
         const colorClass = `column-${COLUMN_COLORS[index % COLUMN_COLORS.length]}`;
-        const items = currentProjectData.items.filter(item => item.column_id === column.id);
+        let items = currentProjectData.items.filter(item => item.column_id === column.id);
+
+        // Apply "Show only my items" filter
+        if (showOnlyMyItems && currentUsername) {
+            items = items.filter(item =>
+                item.assignees && item.assignees.includes(currentUsername)
+            );
+        }
 
         const cardsHtml = items.map(item => {
             const hasMetadata = item.assignees.length > 0 || item.labels.length > 0;
@@ -665,8 +701,20 @@ async function showProjectSelector() {
 
 async function toggleMyItems() {
     try {
-        const newState = await invoke('toggle_my_items');
-        console.log('My items filter toggled to:', newState);
+        showOnlyMyItems = await invoke('toggle_my_items');
+        console.log('My items filter toggled to:', showOnlyMyItems);
+
+        // Get current username if we don't have it
+        if (showOnlyMyItems && !currentUsername) {
+            try {
+                currentUsername = await invoke('current_user');
+                console.log('Got current user:', currentUsername);
+            } catch (error) {
+                console.error('Failed to get current user:', error);
+                showError('Failed to get current GitHub user. Filter may not work correctly.');
+            }
+        }
+
         if (currentProjectData) {
             renderProject();
         }
@@ -772,15 +820,6 @@ window.__TAURI__.event.listen('menu-refresh', async () => {
         await loadProjectData(currentProjectData.project.id);
     } else {
         await loadFirstAvailableProject();
-    }
-});
-
-window.__TAURI__.event.listen('menu-toggle-my-items', async () => {
-    const showOnlyMyItems = await invoke('toggle_my_items');
-    console.log(`Show only my items: ${showOnlyMyItems}`);
-    // Re-render the view with the filter applied
-    if (currentProjectData) {
-        renderProject();
     }
 });
 
