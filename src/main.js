@@ -1334,7 +1334,8 @@ function setupWindowDragging() {
                 return;
             }
 
-            // Helper function to start dragging
+            // Helper function to start dragging with delay to not interfere with double-clicks
+            let dragTimer = null;
             const startDragging = async (e) => {
                 // Don't interfere with card dragging
                 if (isDragging || e.target.closest('.kanban-card')) {
@@ -1342,20 +1343,36 @@ function setupWindowDragging() {
                 }
 
                 if (e.button === 0) { // Left mouse button
-                    e.preventDefault();
-                    e.stopPropagation();
-
-                    try {
-                        console.log('Starting window drag...');
-                        // Use Tauri v2 API structure
-                        const { getCurrentWindow } = window.__TAURI__.window;
-                        const appWindow = getCurrentWindow();
-                        await appWindow.startDragging();
-                        console.log('Window drag completed');
-                    } catch (error) {
-                        console.error('Failed to start window dragging:', error);
-                        console.error('Error details:', error.message || error);
+                    // Clear any existing drag timer
+                    if (dragTimer) {
+                        clearTimeout(dragTimer);
+                        dragTimer = null;
                     }
+
+                    // Delay drag to allow double-click to take precedence
+                    dragTimer = setTimeout(async () => {
+                        try {
+                            console.log('Starting window drag...');
+                            // Use Tauri v2 API structure
+                            const { getCurrentWindow } = window.__TAURI__.window;
+                            const appWindow = getCurrentWindow();
+                            await appWindow.startDragging();
+                            console.log('Window drag completed');
+                        } catch (error) {
+                            console.error('Failed to start window dragging:', error);
+                            console.error('Error details:', error.message || error);
+                        }
+                        dragTimer = null;
+                    }, 200); // 200ms delay to allow double-click detection
+                }
+            };
+
+            // Helper function to cancel drag when double-click occurs
+            const cancelDrag = () => {
+                if (dragTimer) {
+                    clearTimeout(dragTimer);
+                    dragTimer = null;
+                    console.log('Drag cancelled due to double-click');
                 }
             };
 
@@ -1364,6 +1381,7 @@ function setupWindowDragging() {
             if (minimizedView) {
                 console.log('Adding drag handler to minimized view');
                 minimizedView.addEventListener('mousedown', startDragging);
+                minimizedView.addEventListener('dblclick', cancelDrag);
             }
 
             // Make expanded view draggable via column headers and empty space
