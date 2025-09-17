@@ -5,11 +5,11 @@
 
 use anyhow::{Context as _, Result};
 use backoff::{Error as BackoffError, ExponentialBackoff};
+use core::time::Duration;
 use log::{debug, error, info, trace, warn};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::process::Command;
-use std::time::Duration;
 
 /// Represents a GitHub organization
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,10 +29,10 @@ pub struct Project {
     pub id: String,
     /// Project title
     pub title: String,
-    /// Project number within the organization
-    pub number: u32,
     /// Web URL to the project
     pub url: String,
+    /// Project number within the organization
+    pub number: u32,
 }
 
 /// Represents a column in a project board
@@ -40,10 +40,10 @@ pub struct Project {
 pub struct ProjectColumn {
     /// Column/option ID
     pub id: String,
-    /// Column name
-    pub name: String,
     /// Number of items in this column
     pub items_count: usize,
+    /// Column name
+    pub name: String,
 }
 
 /// Represents an item (issue/PR) in a project
@@ -53,34 +53,38 @@ pub struct ProjectItem {
     pub id: String,
     /// Item title
     pub title: String,
-    /// Optional URL to the issue/PR
-    pub url: Option<String>,
     /// List of assignee usernames
     pub assignees: Vec<String>,
-    /// List of label names
-    pub labels: Vec<String>,
     /// ID of the column containing this item
     pub column_id: String,
+    /// List of label names
+    pub labels: Vec<String>,
+    /// Optional URL to the issue/PR
+    pub url: Option<String>,
 }
 
 /// Complete project data including columns and items
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectData {
-    /// The project metadata
-    pub project: Project,
     /// List of columns/statuses
     pub columns: Vec<ProjectColumn>,
-    /// List of items in the project
-    pub items: Vec<ProjectItem>,
-    /// GraphQL field ID for the status field
-    pub status_field_id: String,
     /// List of hidden column IDs
     pub hidden_columns: Vec<String>,
+    /// List of items in the project
+    pub items: Vec<ProjectItem>,
+    /// The project metadata
+    pub project: Project,
+    /// GraphQL field ID for the status field
+    pub status_field_id: String,
 }
 
 /// Type alias for column extraction result
-/// Returns (columns, status_field_id, column_map)
-type ColumnExtractResult = (Vec<ProjectColumn>, String, HashMap<String, (String, String)>);
+/// Returns (columns, `status_field_id`, `column_map`)
+type ColumnExtractResult = (
+    Vec<ProjectColumn>,
+    String,
+    HashMap<String, (String, String)>,
+);
 
 /// GitHub API client using authenticated requests
 pub struct GitHubClient {
@@ -102,9 +106,9 @@ fn create_backoff() -> ExponentialBackoff {
 /// Find the gh CLI command in common locations
 fn find_gh_command() -> Result<String> {
     const POSSIBLE_PATHS: &[&str] = &[
-        "/opt/homebrew/bin/gh",  // Apple Silicon Homebrew
-        "/usr/local/bin/gh",      // Intel Homebrew
-        "gh",                      // System PATH
+        "/opt/homebrew/bin/gh", // Apple Silicon Homebrew
+        "/usr/local/bin/gh",    // Intel Homebrew
+        "gh",                   // System PATH
     ];
 
     for path in POSSIBLE_PATHS {
@@ -114,8 +118,8 @@ fn find_gh_command() -> Result<String> {
             .map(|output| output.status.success())
             .unwrap_or(false)
         {
-            debug!("Found gh at: {}", path);
-            return Ok(path.to_string());
+            debug!("Found gh at: {path}");
+            return Ok((*path).to_string());
         }
     }
 
@@ -138,7 +142,10 @@ impl GitHubClient {
             .context("Failed to execute gh command")?;
 
         if !output.status.success() {
-            error!("gh CLI authentication check failed with status: {:?}", output.status);
+            error!(
+                "gh CLI authentication check failed with status: {:?}",
+                output.status
+            );
             error!("stderr: {}", String::from_utf8_lossy(&output.stderr));
             anyhow::bail!("Failed to get GitHub token. Please ensure 'gh' is authenticated.");
         }
@@ -148,7 +155,10 @@ impl GitHubClient {
             .trim()
             .to_string();
 
-        info!("GitHub client created successfully (token length: {})", token.len());
+        info!(
+            "GitHub client created successfully (token length: {})",
+            token.len()
+        );
         Ok(Self { token })
     }
 
@@ -162,13 +172,13 @@ impl GitHubClient {
         let operation = || async {
             let response = client
                 .get("https://api.github.com/user/orgs")
-                .header("Authorization", format!("Bearer {}", token))
+                .header("Authorization", format!("Bearer {token}"))
                 .header("User-Agent", "Minik-Kanban-App")
                 .timeout(Duration::from_secs(30))
                 .send()
                 .await
                 .map_err(|e| {
-                    warn!("Request failed: {}", e);
+                    warn!("Request failed: {e}");
                     BackoffError::transient(anyhow::anyhow!("Request failed: {}", e))
                 })?;
 
@@ -177,7 +187,7 @@ impl GitHubClient {
             // Retry on rate limits or server errors
             if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
                 let error_body = response.text().await.unwrap_or_default();
-                warn!("GitHub API returned retryable status {}: {}", status, error_body);
+                warn!("GitHub API returned retryable status {status}: {error_body}");
                 return Err(BackoffError::transient(anyhow::anyhow!(
                     "Retryable status {}: {}",
                     status,
@@ -187,27 +197,28 @@ impl GitHubClient {
 
             if !status.is_success() {
                 let error_body = response.text().await.unwrap_or_default();
-                error!("GitHub API returned error status: {} - {}", status, error_body);
+                error!("GitHub API returned error status: {status} - {error_body}");
                 return Err(BackoffError::permanent(anyhow::anyhow!(
                     "Failed to fetch organizations: {}",
                     status
                 )));
             }
 
-            response
-                .json::<Vec<Organization>>()
-                .await
-                .map_err(|e| {
-                    error!("Failed to parse organizations response: {}", e);
-                    BackoffError::permanent(e.into())
-                })
+            response.json::<Vec<Organization>>().await.map_err(|e| {
+                error!("Failed to parse organizations response: {e}");
+                BackoffError::permanent(e.into())
+            })
         };
 
         let orgs = backoff::future::retry(create_backoff(), operation).await?;
 
         info!("Successfully fetched {} organizations", orgs.len());
         for org in &orgs {
-            debug!("  - {} ({})", org.login, org.name.as_deref().unwrap_or("no name"));
+            debug!(
+                "  - {} ({})",
+                org.login,
+                org.name.as_deref().unwrap_or("no name")
+            );
         }
 
         Ok(orgs)
@@ -215,8 +226,6 @@ impl GitHubClient {
 
     /// List all projects for a given organization
     pub async fn list_org_projects(&self, org: &str) -> Result<Vec<Project>> {
-        debug!("Fetching projects for organization: {}", org);
-
         const QUERY: &str = "
         query($org: String!) {
             organization(login: $org) {
@@ -232,6 +241,7 @@ impl GitHubClient {
         }
         ";
 
+        debug!("Fetching projects for organization: {org}");
         let variables = serde_json::json!({ "org": org });
         let response = self.graphql_request(QUERY, variables).await?;
 
@@ -244,15 +254,22 @@ impl GitHubClient {
                 Some(Project {
                     id: p["id"].as_str()?.to_string(),
                     title: p["title"].as_str()?.to_string(),
-                    number: p["number"].as_u64()? as u32,
+                    number: u32::try_from(p["number"].as_u64()?).unwrap_or_default(),
                     url: p["url"].as_str()?.to_string(),
                 })
             })
             .collect::<Vec<_>>();
 
-        info!("Successfully fetched {} projects for org {}", projects.len(), org);
+        info!(
+            "Successfully fetched {} projects for org {}",
+            projects.len(),
+            org
+        );
         for project in &projects {
-            debug!("  - {} (#{}) - {}", project.title, project.number, project.url);
+            debug!(
+                "  - {} (#{}) - {}",
+                project.title, project.number, project.url
+            );
         }
 
         Ok(projects)
@@ -260,8 +277,6 @@ impl GitHubClient {
 
     /// Get detailed data for a specific project
     pub async fn project_data(&self, project_id: &str) -> Result<ProjectData> {
-        info!("Fetching detailed data for project ID: {}", project_id);
-
         const QUERY: &str = "
         query($projectId: ID!) {
             node(id: $projectId) {
@@ -338,32 +353,30 @@ impl GitHubClient {
         }
         ";
 
+        info!("Fetching detailed data for project ID: {project_id}");
         let variables = serde_json::json!({ "projectId": project_id });
         let response = self.graphql_request(QUERY, variables).await?;
         let project_node = &response["data"]["node"];
 
         if project_node.is_null() {
-            error!("Project not found for ID: {}", project_id);
+            error!("Project not found for ID: {project_id}");
             anyhow::bail!("Project not found");
         }
 
         let project = Project {
-            id: project_node["id"]
-                .as_str()
-                .unwrap_or_default()
-                .to_string(),
+            id: project_node["id"].as_str().unwrap_or_default().to_string(),
             title: project_node["title"]
                 .as_str()
                 .unwrap_or_default()
                 .to_string(),
             number: project_node["number"].as_u64().unwrap_or_default() as u32,
-            url: project_node["url"]
-                .as_str()
-                .unwrap_or_default()
-                .to_string(),
+            url: project_node["url"].as_str().unwrap_or_default().to_string(),
         };
 
-        debug!("Project: {} (#{}) - {}", project.title, project.number, project.url);
+        debug!(
+            "Project: {} (#{}) - {}",
+            project.title, project.number, project.url
+        );
 
         let (columns, status_field_id, _column_map) = self.extract_columns(project_node)?;
         let (items, column_counts) = self.extract_items(project_node)?;
@@ -402,24 +415,20 @@ impl GitHubClient {
                 if let Some(fields) = first_view["fields"]["nodes"].as_array() {
                     for field in fields {
                         let field_name = field["name"].as_str().unwrap_or_default();
-                        debug!("Found field: {}", field_name);
+                        debug!("Found field: {field_name}");
 
                         // Only process the Status field for Kanban columns
                         if field_name == "Status" {
                             if let Some(options) = field["options"].as_array() {
                                 let field_id = field["id"].as_str().unwrap_or_default();
                                 status_field_id = field_id.to_string();
-                                info!("Found Status field with ID: {}", field_id);
+                                info!("Found Status field with ID: {field_id}");
 
                                 for option in options {
-                                    let option_id = option["id"]
-                                        .as_str()
-                                        .unwrap_or_default()
-                                        .to_string();
-                                    let option_name = option["name"]
-                                        .as_str()
-                                        .unwrap_or_default()
-                                        .to_string();
+                                    let option_id =
+                                        option["id"].as_str().unwrap_or_default().to_string();
+                                    let option_name =
+                                        option["name"].as_str().unwrap_or_default().to_string();
 
                                     column_map.insert(
                                         option_id.clone(),
@@ -432,7 +441,7 @@ impl GitHubClient {
                                         items_count: 0,
                                     });
 
-                                    info!("  Status column: '{}' with option ID: {}", option_name, option_id);
+                                    info!("  Status column: '{option_name}' with option ID: {option_id}");
                                 }
                             }
                         }
@@ -445,7 +454,10 @@ impl GitHubClient {
     }
 
     /// Extract items from project node response
-    fn extract_items(&self, project_node: &serde_json::Value) -> Result<(Vec<ProjectItem>, HashMap<String, usize>)> {
+    fn extract_items(
+        &self,
+        project_node: &serde_json::Value,
+    ) -> Result<(Vec<ProjectItem>, HashMap<String, usize>)> {
         let mut items = Vec::new();
         let mut column_counts: HashMap<String, usize> = HashMap::new();
 
@@ -459,10 +471,7 @@ impl GitHubClient {
                     continue;
                 }
 
-                let title = content["title"]
-                    .as_str()
-                    .unwrap_or("Untitled")
-                    .to_string();
+                let title = content["title"].as_str().unwrap_or("Untitled").to_string();
                 let url = content["url"].as_str().map(String::from);
 
                 let assignees = content["assignees"]["nodes"]
@@ -516,13 +525,6 @@ impl GitHubClient {
         field_id: &str,
         option_id: &str,
     ) -> Result<()> {
-        info!("====== DRAG & DROP UPDATE ======");
-        info!("Project ID: {}", project_id);
-        info!("Item ID: {}", item_id);
-        info!("Field ID (Status): {}", field_id);
-        info!("Option ID (Column): {}", option_id);
-        info!("=================================");
-
         const MUTATION: &str = "
         mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: ProjectV2FieldValue!) {
             updateProjectV2ItemFieldValue(input: {
@@ -537,6 +539,13 @@ impl GitHubClient {
             }
         }
         ";
+
+        info!("====== DRAG & DROP UPDATE ======");
+        info!("Project ID: {project_id}");
+        info!("Item ID: {item_id}");
+        info!("Field ID (Status): {field_id}");
+        info!("Option ID (Column): {option_id}");
+        info!("=================================");
 
         let variables = serde_json::json!({
             "projectId": project_id,
@@ -561,14 +570,14 @@ impl GitHubClient {
 
         if let Some(errors) = response["errors"].as_array() {
             if !errors.is_empty() {
-                error!("GraphQL errors: {:?}", errors);
+                error!("GraphQL errors: {errors:?}");
                 anyhow::bail!("GraphQL errors: {:?}", errors);
             }
         }
 
         if response["data"]["updateProjectV2ItemFieldValue"]["projectV2Item"]["id"].is_null() {
             error!("Failed to update item field - no item ID in response");
-            error!("Full response: {:?}", response);
+            error!("Full response: {response:?}");
             anyhow::bail!("Failed to update item field - no item ID in response");
         }
 
@@ -584,7 +593,11 @@ impl GitHubClient {
     ) -> Result<serde_json::Value> {
         info!("🌐 ========== GRAPHQL REQUEST ==========");
         info!("📍 Endpoint: https://api.github.com/graphql");
-        info!("🔑 Token present: {} (length: {})", !self.token.is_empty(), self.token.len());
+        info!(
+            "🔑 Token present: {} (length: {})",
+            !self.token.is_empty(),
+            self.token.len()
+        );
         info!(
             "📝 Query preview: {}",
             query.lines().take(2).collect::<Vec<_>>().join(" ")
@@ -606,24 +619,24 @@ impl GitHubClient {
 
             let response = client
                 .post("https://api.github.com/graphql")
-                .header("Authorization", format!("Bearer {}", token))
+                .header("Authorization", format!("Bearer {token}"))
                 .header("User-Agent", "Minik-Kanban-App")
                 .json(&request_body)
                 .timeout(Duration::from_secs(30))
                 .send()
                 .await
                 .map_err(|e| {
-                    warn!("GraphQL request failed: {}", e);
+                    warn!("GraphQL request failed: {e}");
                     BackoffError::transient(anyhow::anyhow!("GraphQL request failed: {}", e))
                 })?;
 
             let status = response.status();
-            info!("📨 Response received! Status: {}", status);
+            info!("📨 Response received! Status: {status}");
 
             // Retry on rate limits or server errors
             if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
                 let error_text = response.text().await.unwrap_or_default();
-                warn!("GraphQL returned retryable status {}: {}", status, error_text);
+                warn!("GraphQL returned retryable status {status}: {error_text}");
                 return Err(BackoffError::transient(anyhow::anyhow!(
                     "Retryable GraphQL status {}: {}",
                     status,
@@ -633,26 +646,23 @@ impl GitHubClient {
 
             if !status.is_success() {
                 let error_text = response.text().await.unwrap_or_default();
-                error!("GraphQL request failed with status {}: {}", status, error_text);
+                error!("GraphQL request failed with status {status}: {error_text}");
                 return Err(BackoffError::permanent(anyhow::anyhow!(
                     "GraphQL request failed: {}",
                     error_text
                 )));
             }
 
-            let data: serde_json::Value = response
-                .json()
-                .await
-                .map_err(|e| {
-                    error!("Failed to parse GraphQL response: {}", e);
-                    BackoffError::permanent(e.into())
-                })?;
+            let data: serde_json::Value = response.json().await.map_err(|e| {
+                error!("Failed to parse GraphQL response: {e}");
+                BackoffError::permanent(e.into())
+            })?;
 
             // Check for GraphQL errors in response
             if let Some(errors) = data["errors"].as_array() {
                 if !errors.is_empty() {
                     // Some GraphQL errors might be transient (e.g., timeout)
-                    let error_msg = format!("GraphQL errors: {:?}", errors);
+                    let error_msg = format!("GraphQL errors: {errors:?}");
 
                     // Check if any error mentions rate limiting or timeouts
                     let is_transient = errors.iter().any(|e| {
@@ -661,11 +671,11 @@ impl GitHubClient {
                     });
 
                     if is_transient {
-                        warn!("GraphQL response contains transient errors: {:?}", errors);
+                        warn!("GraphQL response contains transient errors: {errors:?}");
                         return Err(BackoffError::transient(anyhow::anyhow!(error_msg)));
                     }
 
-                    error!("GraphQL response contains errors: {:?}", errors);
+                    error!("GraphQL response contains errors: {errors:?}");
                     return Err(BackoffError::permanent(anyhow::anyhow!(error_msg)));
                 }
             }

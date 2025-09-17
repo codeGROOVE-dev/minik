@@ -9,8 +9,8 @@ mod logging;
 use github::{GitHubClient, Organization, Project, ProjectData};
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
-use tauri::{Manager, State, AppHandle, WindowEvent, Emitter, PhysicalPosition};
-use tauri::menu::{MenuItemBuilder, SubmenuBuilder, Menu};
+use tauri::menu::{Menu, MenuItemBuilder, SubmenuBuilder};
+use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, State, WindowEvent};
 
 /// Application state that persists between sessions
 #[derive(Serialize, Deserialize, Clone)]
@@ -60,7 +60,7 @@ async fn github_token() -> Result<String, String> {
             "authenticated".to_string()
         })
         .map_err(|e| {
-            log::error!("GitHub authentication failed: {}", e);
+            log::error!("GitHub authentication failed: {e}");
             e.to_string()
         })
 }
@@ -71,17 +71,14 @@ async fn list_organizations() -> Result<Vec<Organization>, String> {
     log::debug!("Listing GitHub organizations");
 
     let client = GitHubClient::new().map_err(|e| {
-        log::error!("Failed to create GitHub client: {}", e);
+        log::error!("Failed to create GitHub client: {e}");
         e.to_string()
     })?;
 
-    let result = client
-        .list_organizations()
-        .await
-        .map_err(|e| {
-            log::error!("Failed to list organizations: {}", e);
-            e.to_string()
-        })?;
+    let result = client.list_organizations().await.map_err(|e| {
+        log::error!("Failed to list organizations: {e}");
+        e.to_string()
+    })?;
 
     log::info!("Successfully fetched {} organizations", result.len());
     for org in &result {
@@ -93,55 +90,69 @@ async fn list_organizations() -> Result<Vec<Organization>, String> {
 /// List all projects for a specific organization
 #[tauri::command]
 async fn list_org_projects(org: String) -> Result<Vec<Project>, String> {
-    log::debug!("Listing projects for organization: {}", org);
+    log::debug!("Listing projects for organization: {org}");
 
     let client = GitHubClient::new().map_err(|e| {
-        log::error!("Failed to create GitHub client: {}", e);
+        log::error!("Failed to create GitHub client: {e}");
         e.to_string()
     })?;
 
-    let result = client
-        .list_org_projects(&org)
-        .await
-        .map_err(|e| {
-            log::error!("Failed to list projects for org {}: {}", org, e);
-            e.to_string()
-        })?;
+    let result = client.list_org_projects(&org).await.map_err(|e| {
+        log::error!("Failed to list projects for org {org}: {e}");
+        e.to_string()
+    })?;
 
-    log::info!("Successfully fetched {} projects for org {}", result.len(), org);
+    log::info!(
+        "Successfully fetched {} projects for org {}",
+        result.len(),
+        org
+    );
     Ok(result)
 }
 
 /// Fetch detailed data for a specific project
 #[tauri::command]
-async fn project_data(project_id: String, state: State<'_, AppStateWrapper>, app_handle: AppHandle) -> Result<ProjectData, String> {
-    log::debug!("Fetching data for project: {}", project_id);
+async fn project_data(
+    project_id: String,
+    state: State<'_, AppStateWrapper>,
+    app_handle: AppHandle,
+) -> Result<ProjectData, String> {
+    log::debug!("Fetching data for project: {project_id}");
     let client = GitHubClient::new().map_err(|e| {
-        log::error!("Failed to create GitHub client: {}", e);
+        log::error!("Failed to create GitHub client: {e}");
         e.to_string()
     })?;
-    let mut result = client
-        .project_data(&project_id)
-        .await
-        .map_err(|e| {
-            log::error!("Failed to fetch project data for {}: {}", project_id, e);
-            e.to_string()
-        })?;
+    let mut result = client.project_data(&project_id).await.map_err(|e| {
+        log::error!("Failed to fetch project data for {project_id}: {e}");
+        e.to_string()
+    })?;
 
     // Add the hidden columns information from the current state
-    result.hidden_columns = state.0.lock().unwrap().hidden_columns.clone();
+    result.hidden_columns = state
+        .0
+        .lock()
+        .map_err(|e| format!("Failed to lock state: {}", e))?
+        .hidden_columns
+        .clone();
 
-    log::info!("Successfully fetched project '{}' with {} columns and {} items",
-              result.project.title, result.columns.len(), result.items.len());
+    log::info!(
+        "Successfully fetched project '{}' with {} columns and {} items",
+        result.project.title,
+        result.columns.len(),
+        result.items.len()
+    );
 
     // Store the column count and field ID for later use
-    let mut app_state = state.0.lock().unwrap();
+    let mut app_state = state
+        .0
+        .lock()
+        .map_err(|e| format!("Failed to lock state: {}", e))?;
     app_state.last_column_count = result.columns.len() as u32;
     app_state.status_field_id = result.status_field_id.clone();
 
     // Update the hide columns menu dynamically
     if let Err(e) = update_column_menu(&app_handle, &result.columns, &app_state.hidden_columns) {
-        log::error!("Failed to update column menu: {}", e);
+        log::error!("Failed to update column menu: {e}");
     }
 
     Ok(result)
@@ -149,14 +160,24 @@ async fn project_data(project_id: String, state: State<'_, AppStateWrapper>, app
 
 /// Update an item's column (move it to a different status)
 #[tauri::command]
-async fn update_item_column(project_id: String, item_id: String, column_id: String, state: State<'_, AppStateWrapper>) -> Result<(), String> {
+async fn update_item_column(
+    project_id: String,
+    item_id: String,
+    column_id: String,
+    state: State<'_, AppStateWrapper>,
+) -> Result<(), String> {
     log::info!("\n🎯🎯🎯 UPDATE_ITEM_COLUMN COMMAND CALLED 🎯🎯🎯");
-    log::info!("  Project ID: {}", project_id);
-    log::info!("  Item ID: {}", item_id);
-    log::info!("  Target Column ID: {}", column_id);
+    log::info!("  Project ID: {project_id}");
+    log::info!("  Item ID: {item_id}");
+    log::info!("  Target Column ID: {column_id}");
 
-    let field_id = state.0.lock().unwrap().status_field_id.clone();
-    log::info!("  Retrieved Status Field ID from state: '{}'", field_id);
+    let field_id = state
+        .0
+        .lock()
+        .map_err(|e| format!("Failed to lock state: {}", e))?
+        .status_field_id
+        .clone();
+    log::info!("  Retrieved Status Field ID from state: '{field_id}'");
 
     if field_id.is_empty() {
         log::error!("❌ Status field ID is empty! Cannot proceed with update.");
@@ -165,7 +186,7 @@ async fn update_item_column(project_id: String, item_id: String, column_id: Stri
 
     log::info!("📞 Creating GitHub client...");
     let client = GitHubClient::new().map_err(|e| {
-        log::error!("❌ Failed to create GitHub client: {}", e);
+        log::error!("❌ Failed to create GitHub client: {e}");
         e.to_string()
     })?;
     log::info!("✅ GitHub client created successfully");
@@ -174,12 +195,12 @@ async fn update_item_column(project_id: String, item_id: String, column_id: Stri
     client
         .update_item_field(&project_id, &item_id, &field_id, &column_id)
         .await
-        .map(|_| {
+        .map(|()| {
             log::info!("✅✅✅ Successfully updated item column on GitHub!");
         })
         .map_err(|e| {
-            log::error!("❌❌❌ Failed to update item column: {}", e);
-            format!("GitHub API error: {}", e)
+            log::error!("❌❌❌ Failed to update item column: {e}");
+            format!("GitHub API error: {e}")
         })
 }
 
@@ -187,15 +208,18 @@ async fn update_item_column(project_id: String, item_id: String, column_id: Stri
 #[tauri::command]
 fn toggle_expanded(state: State<AppStateWrapper>, _app_handle: AppHandle) -> Result<bool, String> {
     log::debug!("Toggling window expanded state");
-    let mut app_state = state.0.lock().unwrap();
+    let mut app_state = state
+        .0
+        .lock()
+        .map_err(|e| format!("Failed to lock state: {}", e))?;
     app_state.is_expanded = !app_state.is_expanded;
     let is_expanded = app_state.is_expanded;
     let column_count = app_state.last_column_count;
-    log::info!("Window expanded state changed to: {}, columns: {}", is_expanded, column_count);
+    log::info!("Window expanded state changed to: {is_expanded}, columns: {column_count}");
 
     // Note: Window sizing is now handled dynamically by JavaScript
     // Rust only handles the state toggle, not the sizing
-    log::info!("Expanded state toggled to: {}, JavaScript will handle dynamic sizing", is_expanded);
+    log::info!("Expanded state toggled to: {is_expanded}, JavaScript will handle dynamic sizing");
 
     Ok(is_expanded)
 }
@@ -203,7 +227,7 @@ fn toggle_expanded(state: State<AppStateWrapper>, _app_handle: AppHandle) -> Res
 /// Resize the window to fit a specific number of columns
 #[tauri::command]
 fn resize_window_for_columns(column_count: u32, app_handle: AppHandle) -> Result<(), String> {
-    log::debug!("Resizing window for {} columns", column_count);
+    log::debug!("Resizing window for {column_count} columns");
 
     if let Some(window) = app_handle.get_webview_window("main") {
         // Calculate width: base padding + (column width * count) + gaps
@@ -213,14 +237,15 @@ fn resize_window_for_columns(column_count: u32, app_handle: AppHandle) -> Result
         let gap = 4; // Gap between columns
 
         // Calculate exact width needed for visible columns
-        let width = padding + (column_width * column_count) + (gap * column_count.saturating_sub(1));
+        let width =
+            padding + (column_width * column_count) + (gap * column_count.saturating_sub(1));
         // No artificial max width limit
 
         let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
-            width: width as f64,
-            height: 480.0,  // Compact height
+            width: f64::from(width),
+            height: 480.0, // Compact height
         }));
-        log::info!("Window resized to {} x 480 for {} columns", width, column_count);
+        log::info!("Window resized to {width} x 480 for {column_count} columns");
     }
 
     Ok(())
@@ -228,8 +253,12 @@ fn resize_window_for_columns(column_count: u32, app_handle: AppHandle) -> Result
 
 /// Resize the window with a specific column count and height
 #[tauri::command]
-fn resize_window_with_height(column_count: u32, height: u32, app_handle: AppHandle) -> Result<(), String> {
-    log::debug!("Resizing window for {} columns with height {}", column_count, height);
+fn resize_window_with_height(
+    column_count: u32,
+    height: u32,
+    app_handle: AppHandle,
+) -> Result<(), String> {
+    log::debug!("Resizing window for {column_count} columns with height {height}");
 
     if let Some(window) = app_handle.get_webview_window("main") {
         // Calculate width: base padding + (column width * count) + gaps
@@ -238,16 +267,17 @@ fn resize_window_with_height(column_count: u32, height: u32, app_handle: AppHand
         let gap = 4; // Gap between columns
 
         // Calculate exact width needed for visible columns
-        let width = padding + (column_width * column_count) + (gap * column_count.saturating_sub(1));
+        let width =
+            padding + (column_width * column_count) + (gap * column_count.saturating_sub(1));
 
         // Use the exact height from JavaScript without any artificial caps
         let final_height = height;
 
         let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
-            width: width as f64,
-            height: final_height as f64,
+            width: f64::from(width),
+            height: f64::from(final_height),
         }));
-        log::info!("Window resized to {} x {} for {} columns", width, final_height, column_count);
+        log::info!("Window resized to {width} x {final_height} for {column_count} columns");
     }
 
     Ok(())
@@ -255,26 +285,32 @@ fn resize_window_with_height(column_count: u32, height: u32, app_handle: AppHand
 
 /// Resize the window to exact dimensions
 #[tauri::command]
-fn resize_window_to_dimensions(width: u32, height: u32, app_handle: AppHandle) -> Result<(), String> {
-    log::debug!("Resizing window to exact dimensions: {}x{}", width, height);
+fn resize_window_to_dimensions(
+    width: u32,
+    height: u32,
+    app_handle: AppHandle,
+) -> Result<(), String> {
+    log::debug!("Resizing window to exact dimensions: {width}x{height}");
 
     if let Some(window) = app_handle.get_webview_window("main") {
         let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
-            width: width as f64,
-            height: height as f64,
+            width: f64::from(width),
+            height: f64::from(height),
         }));
-        log::info!("Window resized to exact dimensions: {} x {}", width, height);
+        log::info!("Window resized to exact dimensions: {width} x {height}");
     }
 
     Ok(())
 }
 
-
-
 /// Resize the window to accommodate a context menu
 #[tauri::command]
-fn resize_for_context_menu(column_count: u32, show_menu: bool, app_handle: AppHandle) -> Result<(), String> {
-    log::debug!("Resizing for context menu: show={}, columns={}", show_menu, column_count);
+fn resize_for_context_menu(
+    column_count: u32,
+    show_menu: bool,
+    app_handle: AppHandle,
+) -> Result<(), String> {
+    log::debug!("Resizing for context menu: show={show_menu}, columns={column_count}");
 
     if let Some(window) = app_handle.get_webview_window("main") {
         let column_width = 190;
@@ -282,7 +318,8 @@ fn resize_for_context_menu(column_count: u32, show_menu: bool, app_handle: AppHa
         let gap = 4;
 
         // Calculate base width needed for visible columns
-        let content_width = padding + (column_width * column_count) + (gap * column_count.saturating_sub(1));
+        let content_width =
+            padding + (column_width * column_count) + (gap * column_count.saturating_sub(1));
 
         // Add extra space for context menu only when shown
         let width = if show_menu {
@@ -293,10 +330,10 @@ fn resize_for_context_menu(column_count: u32, show_menu: bool, app_handle: AppHa
         };
 
         let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
-            width: width as f64,
+            width: f64::from(width),
             height: 480.0,
         }));
-        log::info!("Window resized to {}x480 (menu: {})", width, show_menu);
+        log::info!("Window resized to {width}x480 (menu: {show_menu})");
     }
 
     Ok(())
@@ -304,20 +341,30 @@ fn resize_for_context_menu(column_count: u32, show_menu: bool, app_handle: AppHa
 
 /// Select a project and update the application state
 #[tauri::command]
-fn select_project(project_id: String, state: State<AppStateWrapper>, app_handle: AppHandle) -> Result<(), String> {
-    log::info!("Selecting project: {}", project_id);
-    let mut app_state = state.0.lock().unwrap();
+fn select_project(
+    project_id: String,
+    state: State<AppStateWrapper>,
+    app_handle: AppHandle,
+) -> Result<(), String> {
+    log::info!("Selecting project: {project_id}");
+    let mut app_state = state
+        .0
+        .lock()
+        .map_err(|e| format!("Failed to lock state: {}", e))?;
     let old_project = app_state.selected_project_id.clone();
 
     // Save current project's hidden columns
     if let Some(old_id) = old_project {
         let hidden_cols = app_state.hidden_columns.clone();
-        app_state.project_column_settings.insert(old_id, hidden_cols);
+        app_state
+            .project_column_settings
+            .insert(old_id, hidden_cols);
     }
 
     // Load new project's hidden columns
     app_state.selected_project_id = Some(project_id.clone());
-    app_state.hidden_columns = app_state.project_column_settings
+    app_state.hidden_columns = app_state
+        .project_column_settings
         .get(&project_id)
         .cloned()
         .unwrap_or_default();
@@ -329,21 +376,24 @@ fn select_project(project_id: String, state: State<AppStateWrapper>, app_handle:
         let _ = window.emit("project-changed", project_id.clone());
     }
 
-    log::debug!("Project {} selected and state saved", project_id);
+    log::debug!("Project {project_id} selected and state saved");
     Ok(())
 }
 
 /// Get the currently selected project ID
 #[tauri::command]
 fn current_project(state: State<AppStateWrapper>) -> Option<String> {
-    let app_state = state.0.lock().unwrap();
+    let app_state = state.0.lock().ok()?;
     app_state.selected_project_id.clone()
 }
 
 /// Toggle the "show only my items" filter
 #[tauri::command]
 fn toggle_my_items(state: State<AppStateWrapper>) -> Result<bool, String> {
-    let mut app_state = state.0.lock().unwrap();
+    let mut app_state = state
+        .0
+        .lock()
+        .map_err(|e| format!("Failed to lock state: {}", e))?;
     app_state.show_only_my_items = !app_state.show_only_my_items;
     save_state(&app_state);
     Ok(app_state.show_only_my_items)
@@ -351,9 +401,19 @@ fn toggle_my_items(state: State<AppStateWrapper>) -> Result<bool, String> {
 
 /// Toggle the visibility of a specific column
 #[tauri::command]
-fn toggle_column_visibility(column_id: String, state: State<AppStateWrapper>) -> Result<bool, String> {
-    let mut app_state = state.0.lock().unwrap();
-    let is_visible = if let Some(index) = app_state.hidden_columns.iter().position(|c| c == &column_id) {
+fn toggle_column_visibility(
+    column_id: String,
+    state: State<AppStateWrapper>,
+) -> Result<bool, String> {
+    let mut app_state = state
+        .0
+        .lock()
+        .map_err(|e| format!("Failed to lock state: {}", e))?;
+    let is_visible = if let Some(index) = app_state
+        .hidden_columns
+        .iter()
+        .position(|c| c == &column_id)
+    {
         app_state.hidden_columns.remove(index);
         true
     } else {
@@ -364,7 +424,9 @@ fn toggle_column_visibility(column_id: String, state: State<AppStateWrapper>) ->
     // Also update the project-specific settings
     let hidden_cols = app_state.hidden_columns.clone();
     if let Some(project_id) = app_state.selected_project_id.clone() {
-        app_state.project_column_settings.insert(project_id, hidden_cols);
+        app_state
+            .project_column_settings
+            .insert(project_id, hidden_cols);
     }
 
     save_state(&app_state);
@@ -373,9 +435,16 @@ fn toggle_column_visibility(column_id: String, state: State<AppStateWrapper>) ->
 
 /// Hide a specific column for a project
 #[tauri::command]
-fn hide_column(project_id: String, column_id: String, state: State<AppStateWrapper>) -> Result<(), String> {
-    log::info!("Hiding column {} for project {}", column_id, project_id);
-    let mut app_state = state.0.lock().unwrap();
+fn hide_column(
+    project_id: String,
+    column_id: String,
+    state: State<AppStateWrapper>,
+) -> Result<(), String> {
+    log::info!("Hiding column {column_id} for project {project_id}");
+    let mut app_state = state
+        .0
+        .lock()
+        .map_err(|e| format!("Failed to lock state: {}", e))?;
 
     // Add to hidden columns if not already hidden
     if !app_state.hidden_columns.contains(&column_id) {
@@ -384,60 +453,90 @@ fn hide_column(project_id: String, column_id: String, state: State<AppStateWrapp
 
     // Update project-specific settings
     let hidden_cols = app_state.hidden_columns.clone();
-    app_state.project_column_settings.insert(project_id, hidden_cols);
+    app_state
+        .project_column_settings
+        .insert(project_id, hidden_cols);
 
     save_state(&app_state);
-    log::debug!("Column {} hidden successfully", column_id);
+    log::debug!("Column {column_id} hidden successfully");
     Ok(())
 }
 
 /// Show a previously hidden column for a project
 #[tauri::command]
-fn show_column(project_id: String, column_id: String, state: State<AppStateWrapper>) -> Result<(), String> {
-    log::info!("Showing column {} for project {}", column_id, project_id);
-    let mut app_state = state.0.lock().unwrap();
+fn show_column(
+    project_id: String,
+    column_id: String,
+    state: State<AppStateWrapper>,
+) -> Result<(), String> {
+    log::info!("Showing column {column_id} for project {project_id}");
+    let mut app_state = state
+        .0
+        .lock()
+        .map_err(|e| format!("Failed to lock state: {}", e))?;
 
     // Remove from hidden columns
-    if let Some(index) = app_state.hidden_columns.iter().position(|c| c == &column_id) {
+    if let Some(index) = app_state
+        .hidden_columns
+        .iter()
+        .position(|c| c == &column_id)
+    {
         app_state.hidden_columns.remove(index);
     }
 
     // Update project-specific settings
     let hidden_cols = app_state.hidden_columns.clone();
-    app_state.project_column_settings.insert(project_id, hidden_cols);
+    app_state
+        .project_column_settings
+        .insert(project_id, hidden_cols);
 
     save_state(&app_state);
-    log::debug!("Column {} shown successfully", column_id);
+    log::debug!("Column {column_id} shown successfully");
     Ok(())
 }
 
 /// Get the list of hidden column IDs
 #[tauri::command]
 fn hidden_columns(state: State<AppStateWrapper>) -> Vec<String> {
-    let app_state = state.0.lock().unwrap();
-    app_state.hidden_columns.clone()
+    match state.0.lock() {
+        Ok(app_state) => app_state.hidden_columns.clone(),
+        Err(e) => {
+            log::error!("Failed to lock state for hidden_columns: {}", e);
+            Vec::new()
+        }
+    }
 }
 
 /// Check if the window is in expanded state
 #[tauri::command]
 fn is_expanded(state: State<AppStateWrapper>) -> bool {
-    let app_state = state.0.lock().unwrap();
-    app_state.is_expanded
+    match state.0.lock() {
+        Ok(app_state) => app_state.is_expanded,
+        Err(e) => {
+            log::error!("Failed to lock state for is_expanded: {}", e);
+            false
+        }
+    }
 }
 
 /// Check if the "show only my items" filter is active
 #[tauri::command]
 fn show_only_my_items(state: State<AppStateWrapper>) -> bool {
-    let app_state = state.0.lock().unwrap();
-    app_state.show_only_my_items
+    match state.0.lock() {
+        Ok(app_state) => app_state.show_only_my_items,
+        Err(e) => {
+            log::error!("Failed to lock state for show_only_my_items: {}", e);
+            false
+        }
+    }
 }
 
 /// Find the gh command in common locations
 fn find_gh_command() -> Result<String, String> {
     const POSSIBLE_PATHS: &[&str] = &[
-        "/opt/homebrew/bin/gh",  // Apple Silicon Homebrew
-        "/usr/local/bin/gh",      // Intel Homebrew
-        "gh",                      // System PATH
+        "/opt/homebrew/bin/gh", // Apple Silicon Homebrew
+        "/usr/local/bin/gh",    // Intel Homebrew
+        "gh",                   // System PATH
     ];
 
     POSSIBLE_PATHS
@@ -450,8 +549,8 @@ fn find_gh_command() -> Result<String, String> {
                 .unwrap_or(false)
         })
         .map(|path| {
-            log::debug!("Found gh at: {}", path);
-            path.to_string()
+            log::debug!("Found gh at: {path}");
+            (*path).to_string()
         })
         .ok_or_else(|| {
             log::error!("Could not find gh CLI in any common location");
@@ -467,16 +566,16 @@ async fn current_user() -> Result<String, String> {
     let output = std::process::Command::new(&gh_path)
         .args(["api", "user", "--jq", ".login"])
         .output()
-        .map_err(|e| format!("Failed to execute gh command: {}", e))?;
+        .map_err(|e| format!("Failed to execute gh command: {e}"))?;
 
     if !output.status.success() {
         let error = String::from_utf8_lossy(&output.stderr);
-        log::error!("Failed to get current user: {}", error);
-        return Err(format!("Failed to get current user: {}", error));
+        log::error!("Failed to get current user: {error}");
+        return Err(format!("Failed to get current user: {error}"));
     }
 
     let username = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    log::info!("Current GitHub user: {}", username);
+    log::info!("Current GitHub user: {username}");
     Ok(username)
 }
 
@@ -484,49 +583,45 @@ fn save_state(state: &AppState) {
     log::debug!("Saving application state");
     match serde_json::to_string(state) {
         Ok(json) => {
-            let path = dirs::config_dir()
-                .map(|p| p.join("minik").join("state.json"));
+            let path = dirs::config_dir().map(|p| p.join("minik").join("state.json"));
 
             if let Some(path) = path {
                 if let Some(parent) = path.parent() {
                     if let Err(e) = std::fs::create_dir_all(parent) {
-                        log::error!("Failed to create config directory: {}", e);
+                        log::error!("Failed to create config directory: {e}");
                         return;
                     }
                 }
                 match std::fs::write(&path, json) {
-                    Ok(_) => log::debug!("State saved successfully to {:?}", path),
-                    Err(e) => log::error!("Failed to write state to {:?}: {}", path, e),
+                    Ok(()) => log::debug!("State saved successfully to {path:?}"),
+                    Err(e) => log::error!("Failed to write state to {path:?}: {e}"),
                 }
             } else {
                 log::error!("Could not determine config directory");
             }
         }
-        Err(e) => log::error!("Failed to serialize state: {}", e),
+        Err(e) => log::error!("Failed to serialize state: {e}"),
     }
 }
 
 fn load_state() -> AppState {
     log::debug!("Loading application state");
-    let path = dirs::config_dir()
-        .map(|p| p.join("minik").join("state.json"));
+    let path = dirs::config_dir().map(|p| p.join("minik").join("state.json"));
 
     if let Some(path) = path {
         match std::fs::read_to_string(&path) {
-            Ok(json) => {
-                match serde_json::from_str(&json) {
-                    Ok(state) => {
-                        log::info!("State loaded successfully from {:?}", path);
-                        return state;
-                    }
-                    Err(e) => log::warn!("Failed to parse state file: {}", e),
+            Ok(json) => match serde_json::from_str(&json) {
+                Ok(state) => {
+                    log::info!("State loaded successfully from {path:?}");
+                    return state;
                 }
-            }
+                Err(e) => log::warn!("Failed to parse state file: {e}"),
+            },
             Err(e) => {
-                if e.kind() != std::io::ErrorKind::NotFound {
-                    log::warn!("Failed to read state file: {}", e);
-                } else {
+                if e.kind() == std::io::ErrorKind::NotFound {
                     log::debug!("No existing state file found, using defaults");
+                } else {
+                    log::warn!("Failed to read state file: {e}");
                 }
             }
         }
@@ -548,7 +643,10 @@ async fn update_project_menu(app_handle: AppHandle) -> Result<(), String> {
 
 /// Update the columns menu dynamically with new column data
 #[tauri::command]
-async fn update_columns_menu(columns: Vec<github::ProjectColumn>, app_handle: AppHandle) -> Result<(), String> {
+async fn update_columns_menu(
+    columns: Vec<github::ProjectColumn>,
+    app_handle: AppHandle,
+) -> Result<(), String> {
     log::debug!("Updating columns menu with {} columns", columns.len());
     rebuild_columns_menu(&app_handle, columns)?;
     Ok(())
@@ -561,36 +659,47 @@ async fn show_project_context_menu(app_handle: AppHandle) -> Result<(), String> 
     log::debug!("Showing project context menu");
 
     // Get organizations first
-    let orgs = list_organizations().await.map_err(|e| format!("Failed to get organizations: {}", e))?;
+    let orgs = list_organizations()
+        .await
+        .map_err(|e| format!("Failed to get organizations: {e}"))?;
 
     // Fetch all projects in parallel
-    let org_project_futures: Vec<_> = orgs.iter().map(|org| {
-        let org_login = org.login.clone();
-        async move {
-            let projects = list_org_projects(org_login.clone()).await.unwrap_or_default();
-            (org_login, projects)
-        }
-    }).collect();
+    let org_project_futures: Vec<_> = orgs
+        .iter()
+        .map(|org| {
+            let org_login = org.login.clone();
+            async move {
+                let projects = list_org_projects(org_login.clone())
+                    .await
+                    .unwrap_or_default();
+                (org_login, projects)
+            }
+        })
+        .collect();
 
     let org_projects = join_all(org_project_futures).await;
 
     // Build a simple HashMap-like structure for the frontend
-    let projects_by_org: std::collections::HashMap<String, Vec<serde_json::Value>> =
-        org_projects.into_iter()
-            .filter(|(_, projects)| !projects.is_empty())
-            .map(|(org_login, projects)| {
-                let project_values = projects.into_iter()
-                    .filter_map(|p| serde_json::to_value(p).ok())
-                    .collect();
-                (org_login, project_values)
-            })
-            .collect();
+    let projects_by_org: std::collections::HashMap<String, Vec<serde_json::Value>> = org_projects
+        .into_iter()
+        .filter(|(_, projects)| !projects.is_empty())
+        .map(|(org_login, projects)| {
+            let project_values = projects
+                .into_iter()
+                .filter_map(|p| serde_json::to_value(p).ok())
+                .collect();
+            (org_login, project_values)
+        })
+        .collect();
 
-    log::info!("Sending projects to frontend: {:?}", projects_by_org.keys().collect::<Vec<_>>());
+    log::info!(
+        "Sending projects to frontend: {:?}",
+        projects_by_org.keys().collect::<Vec<_>>()
+    );
 
     if let Some(window) = app_handle.get_webview_window("main") {
         let result = window.emit("show-project-context-menu-with-projects", &projects_by_org);
-        log::info!("Event emit result: {:?}", result);
+        log::info!("Event emit result: {result:?}");
     }
 
     Ok(())
@@ -598,14 +707,21 @@ async fn show_project_context_menu(app_handle: AppHandle) -> Result<(), String> 
 
 /// Show the column visibility context menu for a specific project
 #[tauri::command]
-async fn show_column_context_menu(project_id: String, app_handle: AppHandle, state: State<'_, AppStateWrapper>) -> Result<(), String> {
-    log::debug!("Showing column context menu for project: {}", project_id);
+async fn show_column_context_menu(
+    project_id: String,
+    app_handle: AppHandle,
+    state: State<'_, AppStateWrapper>,
+) -> Result<(), String> {
+    log::debug!("Showing column context menu for project: {project_id}");
 
     // Get project data to build the context menu
     let project_data = project_data(project_id.clone(), state, app_handle.clone()).await?;
 
     if let Some(window) = app_handle.get_webview_window("main") {
-        let _ = window.emit("show-column-context-menu", (project_id, project_data.columns));
+        let _ = window.emit(
+            "show-column-context-menu",
+            (project_id, project_data.columns),
+        );
     }
 
     Ok(())
@@ -632,8 +748,10 @@ fn rebuild_columns_menu<R: tauri::Runtime>(
     Ok(())
 }
 
-fn setup_app_menu<R: tauri::Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::Error>> {
-    use tauri::menu::{PredefinedMenuItem, CheckMenuItem};
+fn setup_app_menu<R: tauri::Runtime>(
+    app: &mut tauri::App<R>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use tauri::menu::{CheckMenuItem, PredefinedMenuItem};
 
     // Create View menu items
     let refresh = MenuItemBuilder::new("Refresh Project")
@@ -724,14 +842,17 @@ fn setup_app_menu<R: tauri::Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<
             .item(&PredefinedMenuItem::minimize(app, None)?)
             .build()?;
 
-        let menu = Menu::with_items(app, &[
-            &app_menu,
-            &edit_menu,
-            &view_menu,
-            &project_menu,
-            &columns_menu,
-            &window_menu,
-        ])?;
+        let menu = Menu::with_items(
+            app,
+            &[
+                &app_menu,
+                &edit_menu,
+                &view_menu,
+                &project_menu,
+                &columns_menu,
+                &window_menu,
+            ],
+        )?;
 
         app.set_menu(menu)?;
     }
@@ -748,12 +869,7 @@ fn setup_app_menu<R: tauri::Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<
             .item(&PredefinedMenuItem::paste(app)?)
             .build()?;
 
-        let menu = Menu::with_items(app, &[
-            &file_menu,
-            &edit_menu,
-            &view_menu,
-            &project_menu,
-        ])?;
+        let menu = Menu::with_items(app, &[&file_menu, &edit_menu, &view_menu, &project_menu])?;
 
         app.set_menu(menu)?;
     }
@@ -802,7 +918,7 @@ fn setup_app_menu<R: tauri::Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<
                 }
             }
             id if id.starts_with("project-") => {
-                log::info!("Project selected: {}", id);
+                log::info!("Project selected: {id}");
                 let project_id = id.strip_prefix("project-").unwrap_or("").to_string();
                 if let Some(window) = app_handle.get_webview_window("main") {
                     let _ = window.emit("menu-project-selected", project_id);
@@ -821,7 +937,7 @@ fn setup_app_menu<R: tauri::Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<
                 }
             }
             id if id.starts_with("column-") => {
-                log::info!("Column visibility toggle: {}", id);
+                log::info!("Column visibility toggle: {id}");
                 let column_id = id.strip_prefix("column-").unwrap_or("").to_string();
                 if let Some(window) = app_handle.get_webview_window("main") {
                     let _ = window.emit("menu-toggle-column", column_id);
@@ -847,10 +963,10 @@ fn update_column_menu<R: tauri::Runtime>(
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
+pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logging first
     if let Err(e) = logging::init_logging() {
-        eprintln!("Failed to initialize logging: {}", e);
+        eprintln!("Failed to initialize logging: {e}");
     }
 
     log::info!("Starting Minik application");
@@ -892,15 +1008,26 @@ pub fn run() {
             // Build the application menu
             setup_app_menu(app)?;
 
-            let window = app.get_webview_window("main").unwrap();
-
+            let window = app
+                .get_webview_window("main")
+                .ok_or_else(|| "Failed to get main window".to_string())?;
 
             // Restore window position from state
             if let Some(state_wrapper) = app.try_state::<AppStateWrapper>() {
-                let app_state = state_wrapper.0.lock().unwrap();
-                if app_state.window_x != 100 || app_state.window_y != 50 {
-                    let _ = window.set_position(PhysicalPosition::new(app_state.window_x, app_state.window_y));
-                    log::info!("Restored window position to ({}, {})", app_state.window_x, app_state.window_y);
+                if let Ok(app_state) = state_wrapper.0.lock() {
+                    if app_state.window_x != 100 || app_state.window_y != 50 {
+                        let _ = window.set_position(PhysicalPosition::new(
+                            app_state.window_x,
+                            app_state.window_y,
+                        ));
+                        log::info!(
+                            "Restored window position to ({}, {})",
+                            app_state.window_x,
+                            app_state.window_y
+                        );
+                    }
+                } else {
+                    log::error!("Failed to lock state for window position restoration");
                 }
             }
 
@@ -914,28 +1041,32 @@ pub fn run() {
                         log::debug!("Window gained focus");
                     }
                     WindowEvent::Resized(size) => {
-                        log::debug!("Window resized to: {:?}", size);
+                        log::debug!("Window resized to: {size:?}");
                     }
                     WindowEvent::Moved(position) => {
-                        log::debug!("Window moved to: {:?}", position);
+                        log::debug!("Window moved to: {position:?}");
                         // Save window position
-                        if let Some(state_wrapper) = app_handle_clone.try_state::<AppStateWrapper>() {
-                            let mut app_state = state_wrapper.0.lock().unwrap();
-                            app_state.window_x = position.x;
-                            app_state.window_y = position.y;
-                            save_state(&app_state);
+                        if let Some(state_wrapper) = app_handle_clone.try_state::<AppStateWrapper>()
+                        {
+                            if let Ok(mut app_state) = state_wrapper.0.lock() {
+                                app_state.window_x = position.x;
+                                app_state.window_y = position.y;
+                                save_state(&app_state);
+                            } else {
+                                log::error!("Failed to lock state for window position save");
+                            }
                         }
                     }
                     _ => {
-                        log::trace!("Window event: {:?}", event);
+                        log::trace!("Window event: {event:?}");
                     }
                 }
             });
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .run(tauri::generate_context!())?;
 
     log::info!("Minik application shutting down");
+    Ok(())
 }

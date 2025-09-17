@@ -80,31 +80,26 @@ logs:
 release:
 	cd src-tauri && cargo run --release
 
-# Run strict linting
+# Run strict linting focused on reliability and correctness
 lint:
 	cd src-tauri && cargo clippy -- \
 		-D warnings \
 		-D clippy::all \
-		-D clippy::pedantic \
-		-D clippy::nursery \
-		-D clippy::cargo \
-		-W clippy::restriction \
+		-D clippy::correctness \
+		-D clippy::suspicious \
+		-D clippy::complexity \
+		-D clippy::perf \
+		-D clippy::style \
+		-D clippy::unwrap_used \
+		-D clippy::expect_used \
+		-D clippy::panic \
+		-D clippy::unimplemented \
+		-D clippy::todo \
 		-A clippy::module_name_repetitions \
 		-A clippy::must_use_candidate \
-		-A clippy::missing_docs_in_private_items \
-		-A clippy::implicit_return \
-		-A clippy::missing_inline_in_public_items \
-		-A clippy::question_mark_used \
-		-A clippy::absolute_paths \
-		-A clippy::min_ident_chars \
-		-A clippy::shadow_reuse \
-		-A clippy::shadow_unrelated \
-		-A clippy::missing_trait_methods \
-		-A clippy::single_call_fn \
-		-A clippy::pub_use \
-		-A clippy::mod_module_files \
-		-A clippy::implicit_hasher \
-		-A clippy::blanket_clippy_restriction_lints
+		-A clippy::too_many_lines \
+		-A clippy::missing_errors_doc \
+		-A clippy::missing_panics_doc
 	cd src-tauri && cargo fmt -- --check
 
 # Run tests

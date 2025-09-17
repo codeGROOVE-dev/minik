@@ -2,5 +2,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    minik_app_lib::run()
+    if let Err(e) = minik_app_lib::run() {
+        eprintln!("Application error: {}", e);
+        std::process::exit(1);
+    }
 }

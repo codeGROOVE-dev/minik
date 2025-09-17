@@ -1,19 +1,17 @@
+use anyhow::Result;
 use log::LevelFilter;
 use log4rs::{
     append::{
         console::ConsoleAppender,
-        rolling_file::RollingFileAppender,
         rolling_file::policy::compound::{
-            CompoundPolicy,
-            trigger::size::SizeTrigger,
-            roll::fixed_window::FixedWindowRoller,
+            roll::fixed_window::FixedWindowRoller, trigger::size::SizeTrigger, CompoundPolicy,
         },
+        rolling_file::RollingFileAppender,
     },
     config::{Appender, Config, Root},
     encode::pattern::PatternEncoder,
 };
 use std::path::PathBuf;
-use anyhow::Result;
 
 /// Initialize the logging system with both console and file outputs
 pub fn init_logging() -> Result<()> {
@@ -45,9 +43,14 @@ pub fn init_logging() -> Result<()> {
             log_file,
             Box::new(CompoundPolicy::new(
                 Box::new(SizeTrigger::new(10 * 1024 * 1024)), // 10MB
-                Box::new(FixedWindowRoller::builder()
-                    .base(0)
-                    .build(archive_pattern.to_str().unwrap(), 5)?),
+                Box::new(
+                    FixedWindowRoller::builder().base(0).build(
+                        archive_pattern
+                            .to_str()
+                            .ok_or_else(|| anyhow::anyhow!("Invalid archive pattern"))?,
+                        5,
+                    )?,
+                ),
             )),
         )?;
 
@@ -55,10 +58,12 @@ pub fn init_logging() -> Result<()> {
     let config = Config::builder()
         .appender(Appender::builder().build("console", Box::new(console)))
         .appender(Appender::builder().build("file", Box::new(file_appender)))
-        .build(Root::builder()
-            .appender("console")
-            .appender("file")
-            .build(LevelFilter::Info))?;
+        .build(
+            Root::builder()
+                .appender("console")
+                .appender("file")
+                .build(LevelFilter::Info),
+        )?;
 
     // Initialize log4rs
     log4rs::init_config(config)?;
