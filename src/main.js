@@ -691,6 +691,13 @@ function setupContextMenuListeners() {
         showColumnContextMenu(projectId, columns);
     });
 
+    // Listen for project selector event
+    listen('show-project-selector', async (event) => {
+        console.log('Show project selector event received');
+        console.log('Event payload:', event.payload);
+        await showProjectSelector();
+    });
+
     // Add right-click handlers to the app - unified context menu from anywhere
     document.addEventListener('contextmenu', async (e) => {
         e.preventDefault(); // Prevent default context menu
@@ -702,6 +709,9 @@ function setupContextMenuListeners() {
 }
 
 async function showProjectContextMenu(organizations) {
+    // Remove any existing menu first
+    removeContextMenu();
+
     // Create dynamic context menu for projects
     const menu = document.createElement('div');
     menu.className = 'context-menu';
@@ -762,6 +772,9 @@ async function showProjectContextMenu(organizations) {
 }
 
 async function showColumnContextMenu(projectId, columns) {
+    // Remove any existing menu first
+    removeContextMenu();
+
     // Create dynamic context menu for column visibility
     const menu = document.createElement('div');
     menu.className = 'context-menu';
@@ -933,7 +946,8 @@ async function showUnifiedContextMenu() {
     projectsItem.className = 'context-menu-item context-menu-expandable';
     projectsItem.innerHTML = 'Projects <span style="float: right;">›</span>';
     projectsItem.addEventListener('click', async () => {
-        removeContextMenu();
+        console.log('Projects menu clicked - invoking show_project_context_menu');
+        // Don't remove the menu immediately, let the backend trigger the new menu
         await invoke('show_project_context_menu');
     });
     content.appendChild(projectsItem);
@@ -944,7 +958,8 @@ async function showUnifiedContextMenu() {
         columnsItem.className = 'context-menu-item context-menu-expandable';
         columnsItem.innerHTML = 'Columns <span style="float: right;">›</span>';
         columnsItem.addEventListener('click', async () => {
-            removeContextMenu();
+            console.log('Columns menu clicked - invoking show_column_context_menu');
+            // Don't remove the menu immediately, let the backend trigger the new menu
             await invoke('show_column_context_menu', { projectId: currentProjectData.project.id });
         });
         content.appendChild(columnsItem);
@@ -967,6 +982,9 @@ function removeContextMenu() {
 }
 
 async function showProjectSelector() {
+    // Remove any existing menu first
+    removeContextMenu();
+
     try {
         // Create a simple project selector dialog
         const orgs = await invoke('list_organizations');

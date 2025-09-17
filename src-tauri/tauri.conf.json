@@ -38,7 +38,8 @@
           "permissions": [
             "shell:allow-open",
             "core:window:allow-start-dragging",
-            "core:window:default"
+            "core:window:default",
+            "core:event:allow-listen"
           ]
         }
       ]

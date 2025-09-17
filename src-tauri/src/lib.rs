@@ -509,6 +509,10 @@ fn setup_app_menu<R: tauri::Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<
         .accelerator("CmdOrCtrl+E")
         .build(app)?;
 
+    let open_devtools = MenuItemBuilder::new("Open Developer Tools")
+        .id("open-devtools")
+        .accelerator("CmdOrCtrl+Option+I")
+        .build(app)?;
 
     // Create View menu
     let view_menu = SubmenuBuilder::new(app, "View")
@@ -516,6 +520,8 @@ fn setup_app_menu<R: tauri::Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<
         .separator()
         .item(&toggle_my_items)
         .item(&toggle_expanded)
+        .separator()
+        .item(&open_devtools)
         .build()?;
 
     // Create simple Project menu (context menu will handle project selection)
@@ -627,6 +633,12 @@ fn setup_app_menu<R: tauri::Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<
                 log::info!("Toggle expanded menu item selected");
                 if let Some(window) = app_handle.get_webview_window("main") {
                     let _ = window.emit("menu-toggle-expanded", ());
+                }
+            }
+            "open-devtools" => {
+                log::info!("Open developer tools menu item selected");
+                if let Some(window) = app_handle.get_webview_window("main") {
+                    window.open_devtools();
                 }
             }
             "select-project" => {
