@@ -415,10 +415,36 @@ fn show_only_my_items(state: State<AppStateWrapper>) -> bool {
     app_state.show_only_my_items
 }
 
+/// Find the gh command in common locations
+fn find_gh_command() -> Result<String, String> {
+    let possible_paths = vec![
+        "/opt/homebrew/bin/gh",  // Apple Silicon Homebrew
+        "/usr/local/bin/gh",      // Intel Homebrew
+        "gh",                      // System PATH
+    ];
+
+    for path in &possible_paths {
+        let check = std::process::Command::new(path)
+            .arg("--version")
+            .output();
+
+        if let Ok(output) = check {
+            if output.status.success() {
+                log::debug!("Found gh at: {}", path);
+                return Ok(path.to_string());
+            }
+        }
+    }
+
+    log::error!("Could not find gh CLI in any common location");
+    Err("GitHub CLI (gh) not found. Please install it with 'brew install gh' and authenticate with 'gh auth login'".to_string())
+}
+
 #[tauri::command]
 async fn current_user() -> Result<String, String> {
     log::info!("Fetching current user from GitHub");
-    let output = std::process::Command::new("gh")
+    let gh_path = find_gh_command()?;
+    let output = std::process::Command::new(&gh_path)
         .args(["api", "user", "--jq", ".login"])
         .output()
         .map_err(|e| format!("Failed to execute gh command: {}", e))?;

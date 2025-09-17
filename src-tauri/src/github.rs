@@ -48,10 +48,36 @@ pub struct GitHubClient {
     token: String,
 }
 
+/// Find the gh command in common locations
+fn find_gh_command() -> Result<String> {
+    let possible_paths = vec![
+        "/opt/homebrew/bin/gh",  // Apple Silicon Homebrew
+        "/usr/local/bin/gh",      // Intel Homebrew
+        "gh",                      // System PATH
+    ];
+
+    for path in &possible_paths {
+        let check = Command::new(path)
+            .arg("--version")
+            .output();
+
+        if let Ok(output) = check {
+            if output.status.success() {
+                debug!("Found gh at: {}", path);
+                return Ok(path.to_string());
+            }
+        }
+    }
+
+    error!("Could not find gh CLI in any common location");
+    anyhow::bail!("GitHub CLI (gh) not found. Please install it with 'brew install gh' and authenticate with 'gh auth login'")
+}
+
 impl GitHubClient {
     pub fn new() -> Result<Self> {
         debug!("Creating new GitHub client using gh CLI");
-        let output = Command::new("gh")
+        let gh_path = find_gh_command()?;
+        let output = Command::new(&gh_path)
             .args(&["auth", "token"])
             .output()?;
 
