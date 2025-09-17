@@ -232,19 +232,44 @@ function renderMinimizedView() {
     const columnsHtml = visibleColumns.map((column, index) => {
         const colorClass = `column-${COLUMN_COLORS[index % COLUMN_COLORS.length]}`;
 
-        // Calculate count based on filter
-        let itemCount = column.items_count;
+        // Get items in this column
+        let columnItems = currentProjectData.items.filter(item =>
+            item.column_id === column.id
+        );
+
+        // Apply filter if needed
         if (showOnlyMyItems && currentUsername) {
-            const items = currentProjectData.items.filter(item =>
-                item.column_id === column.id &&
+            columnItems = columnItems.filter(item =>
                 item.assignees && item.assignees.includes(currentUsername)
             );
-            itemCount = items.length;
+        }
+
+        const itemCount = columnItems.length;
+
+        // Get initials from column name (e.g., "In Progress" -> "IP")
+        const initials = column.name
+            .split(/\s+/)
+            .map(word => word.charAt(0).toUpperCase())
+            .join('');
+
+        // Get first 2 words of first 2 items
+        let itemPreview = '';
+        if (columnItems.length > 0) {
+            const previews = columnItems.slice(0, 2).map(item => {
+                if (!item.title) return '';
+                // Get first 2 words
+                const words = item.title.split(/\s+/).slice(0, 2).join(' ');
+                // Don't add ellipsis here - CSS will handle overflow
+                return words.length > 20 ? words.substring(0, 20) : words;
+            }).filter(p => p);
+
+            itemPreview = previews.join(', ');
         }
 
         return `
             <span class="column-badge ${colorClass}">
-                ${column.name}: <span class="column-count">${itemCount}</span>
+                <span class="column-name">${initials}•${itemCount}</span>
+                <span class="column-items">${itemPreview}</span>
             </span>
         `;
     }).join('');

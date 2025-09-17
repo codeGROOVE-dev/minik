@@ -65,7 +65,7 @@ body {
 
 .columns-summary {
   display: flex;
-  gap: 8px;
+  gap: 2px;
   font-size: 12px;
   font-weight: 500;
   color: #333;
@@ -75,14 +75,20 @@ body {
 }
 
 .column-badge {
-  padding: 5px 10px;
+  padding: 4px 4px;
   border-radius: 0; /* Sharp corners like Stickies */
   white-space: nowrap;
   transition: all 0.2s;
   box-shadow: none; /* No shadow in minimized view */
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.2px;
+  letter-spacing: 0.1px;
+  display: inline-flex;
+  align-items: baseline;
+  max-width: 1000px; /* Extended width for more content */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-right: 1px;
 }
 
 /* Minimized view column colors matching expanded */
@@ -98,9 +104,26 @@ body {
   box-shadow: none; /* No hover shadow in minimized view */
 }
 
-.column-count {
+.column-name {
   font-weight: 700;
   color: #000;
+}
+
+.column-count {
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.7);
+  margin-right: 3px;
+  font-size: 10px;
+}
+
+.column-items {
+  font-weight: 400;
+  color: rgba(0, 0, 0, 0.8);
+  font-size: 10px;
+  margin-left: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 930px;
 }
 
 .loading {
