@@ -199,7 +199,6 @@ fn toggle_expanded(state: State<AppStateWrapper>, app_handle: AppHandle) -> Resu
 
             // Calculate exact width needed for visible columns
             let width = padding + (column_width * column_count) + (gap * column_count.saturating_sub(1));
-            let width = width.min(1200);
 
             log::info!("Setting expanded window size to {}x480 for {} columns", width, column_count);
             let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
@@ -233,7 +232,7 @@ fn resize_window_for_columns(column_count: u32, app_handle: AppHandle) -> Result
 
         // Calculate exact width needed for visible columns
         let width = padding + (column_width * column_count) + (gap * column_count.saturating_sub(1));
-        let width = width.min(1200);
+        // No artificial max width limit
 
         let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
             width: width as f64,
@@ -257,10 +256,9 @@ fn resize_window_with_height(column_count: u32, height: u32, app_handle: AppHand
 
         // Calculate exact width needed for visible columns
         let width = padding + (column_width * column_count) + (gap * column_count.saturating_sub(1));
-        let width = width.min(1200);
 
-        // Use the calculated height from JavaScript, but cap it at 480 max
-        let final_height = height.min(480);
+        // Use the exact height from JavaScript without any artificial caps
+        let final_height = height;
 
         let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
             width: width as f64,
@@ -271,6 +269,8 @@ fn resize_window_with_height(column_count: u32, height: u32, app_handle: AppHand
 
     Ok(())
 }
+
+
 
 #[tauri::command]
 fn resize_for_context_menu(column_count: u32, show_menu: bool, app_handle: AppHandle) -> Result<(), String> {
@@ -287,9 +287,9 @@ fn resize_for_context_menu(column_count: u32, show_menu: bool, app_handle: AppHa
         // Add extra space for context menu only when shown
         let width = if show_menu {
             // Context menus are max 250px wide, add buffer for submenu
-            (content_width + 260).min(1200)
+            content_width + 260
         } else {
-            content_width.min(1200)
+            content_width
         };
 
         let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
@@ -838,6 +838,7 @@ pub fn run() {
             setup_app_menu(app)?;
 
             let window = app.get_webview_window("main").unwrap();
+
 
             // Restore window position from state
             if let Some(state_wrapper) = app.try_state::<AppStateWrapper>() {

@@ -1213,6 +1213,7 @@ async function refreshProject() {
     }
 }
 
+
 function setupWindowDragging() {
     console.log('Setting up window dragging for frameless window...');
 
