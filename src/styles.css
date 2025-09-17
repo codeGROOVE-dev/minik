@@ -16,6 +16,10 @@ body {
   pointer-events: none; /* Make body transparent to clicks */
   outline: none;
   border: none;
+  /* Eliminate any potential WebKit shadows or artifacts */
+  -webkit-box-shadow: none !important;
+  box-shadow: none !important;
+  -webkit-appearance: none;
 }
 
 /* Remove any focus outlines globally */
@@ -30,6 +34,11 @@ body {
   position: relative;
   overflow: hidden;
   pointer-events: none; /* Make app container transparent to clicks */
+  /* Eliminate any shadows or artifacts */
+  -webkit-box-shadow: none !important;
+  box-shadow: none !important;
+  border: none !important;
+  outline: none !important;
 }
 
 .hidden {
@@ -46,6 +55,11 @@ body {
   cursor: move;
   user-select: none;
   pointer-events: auto; /* Minimized view is clickable */
+  /* Eliminate any shadows or artifacts */
+  -webkit-box-shadow: none !important;
+  box-shadow: none !important;
+  border: none !important;
+  outline: none !important;
 }
 
 
@@ -65,7 +79,7 @@ body {
   border-radius: 0; /* Sharp corners like Stickies */
   white-space: nowrap;
   transition: all 0.2s;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05); /* Subtler shadow */
+  box-shadow: none; /* No shadow in minimized view */
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.2px;
@@ -81,7 +95,7 @@ body {
 
 .column-badge:hover {
   transform: translateY(-1px);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08); /* Subtler hover shadow */
+  box-shadow: none; /* No hover shadow in minimized view */
 }
 
 .column-count {
@@ -132,6 +146,10 @@ body {
   z-index: 9999;
   cursor: move;
   pointer-events: auto; /* Drag handle is clickable */
+}
+
+.window-drag-handle.hidden {
+  display: none !important; /* Completely remove from layout when hidden */
 }
 
 .kanban-column {

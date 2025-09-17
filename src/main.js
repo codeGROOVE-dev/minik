@@ -37,6 +37,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         await checkAuth();
 
         updateStatus('Loading saved project...');
+        // Restore expanded state from backend BEFORE loading project
+        try {
+            const savedState = await invoke('is_expanded');
+            if (savedState) {
+                isExpanded = true;
+                document.getElementById('minimized-view').classList.add('hidden');
+                document.getElementById('expanded-view').classList.remove('hidden');
+                document.getElementById('window-drag-handle').classList.remove('hidden');
+                console.log('Restored expanded state from saved settings');
+            }
+        } catch (error) {
+            console.warn('Failed to load expanded state:', error);
+        }
+
         await loadSavedProject();
 
         updateStatus('Setting up interface...');
@@ -156,6 +170,25 @@ async function loadProjectData(projectId) {
         updateStatus('Fetching project data from GitHub...');
         const projectData = await invoke('project_data', { projectId });
         currentProjectData = projectData;
+
+        // Load saved column visibility settings for this project
+        try {
+            const hiddenColumns = await invoke('hidden_columns');
+            currentProjectData.hiddenColumns = hiddenColumns;
+            console.log('Loaded hidden columns for project:', hiddenColumns);
+        } catch (error) {
+            console.warn('Failed to load hidden columns:', error);
+            currentProjectData.hiddenColumns = [];
+        }
+
+        // Ensure the filter state is current
+        try {
+            showOnlyMyItems = await invoke('show_only_my_items');
+            console.log('Filter state:', showOnlyMyItems);
+        } catch (error) {
+            console.warn('Failed to load filter state:', error);
+        }
+
         updateStatus('Rendering project...');
         renderProject();
     } catch (error) {
@@ -169,6 +202,23 @@ function renderProject() {
 
     renderMinimizedView();
     renderExpandedView();
+
+    // Set proper window size based on current view
+    if (isExpanded) {
+        // Need to wait for DOM to update before calculating heights
+        console.log('Project rendered in expanded view, resizing window...');
+        setTimeout(() => {
+            console.log('Calling calculateAndSetWindowHeight...');
+            calculateAndSetWindowHeight();
+        }, 200); // Give more time for DOM to render
+    } else {
+        // Set minimized view size
+        console.log('Project rendered in minimized view, resizing window...');
+        setTimeout(() => {
+            console.log('Calling setMinimizedViewSize...');
+            setMinimizedViewSize();
+        }, 200);
+    }
 }
 
 function renderMinimizedView() {
@@ -203,42 +253,50 @@ function renderMinimizedView() {
 }
 
 async function calculateAndSetWindowHeight() {
+    console.log('calculateAndSetWindowHeight called');
     // Wait for render to complete
     await new Promise(resolve => setTimeout(resolve, 50));
 
     const board = document.getElementById('kanban-board');
     const expandedView = document.getElementById('expanded-view');
 
+    console.log('Expanded view visible:', expandedView && !expandedView.classList.contains('hidden'));
     if (expandedView && !expandedView.classList.contains('hidden')) {
-        // Calculate actual content height
+        // Calculate actual content height and width
         const rect = board.getBoundingClientRect();
         const columns = board.querySelectorAll('.kanban-column');
 
         let maxHeight = 0;
-        columns.forEach(col => {
+        let totalWidth = 0;
+        columns.forEach((col, index) => {
             const colRect = col.getBoundingClientRect();
             const height = colRect.height;
+            const width = colRect.width;
+            console.log(`Column ${index}: ${col.querySelector('.column-header')?.textContent} height = ${height}px, width = ${width}px`);
             if (height > maxHeight) {
                 maxHeight = height;
             }
+            totalWidth += width;
         });
+
+        // Add padding from the board (6px left + 6px right = 12px) and gaps between columns
+        const gaps = Math.max(0, columns.length - 1) * 4; // 4px gap between columns
+        const totalWidthWithPadding = Math.ceil(totalWidth + 12 + gaps);
 
         // Add padding from the board (6px top + 6px bottom = 12px)
         const totalHeight = Math.ceil(maxHeight + 12);
+        console.log(`Max column height: ${maxHeight}px, Total width: ${totalWidthWithPadding}px, Total height: ${totalHeight}px`);
 
         // Resize window to match actual content
         try {
-            const hiddenColumns = currentProjectData.hiddenColumns || [];
-            const visibleColumns = currentProjectData.columns.filter(
-                col => !hiddenColumns.includes(col.id)
-            );
-
-            await invoke('resize_window_with_height', {
-                columnCount: visibleColumns.length,
+            console.log(`Resizing window to ${totalWidthWithPadding}x${totalHeight} for ${columns.length} visible columns`);
+            await invoke('resize_window_to_dimensions', {
+                width: totalWidthWithPadding,
                 height: totalHeight
             });
+            console.log('Window resize completed');
         } catch (error) {
-            console.error('Failed to resize window height:', error);
+            console.error('Failed to resize window:', error);
         }
     }
 }
@@ -578,6 +636,56 @@ async function toggleView() {
         document.getElementById('minimized-view').classList.remove('hidden');
         document.getElementById('expanded-view').classList.add('hidden');
         dragHandle.classList.add('hidden');
+
+        // Set minimized view size dynamically
+        await setMinimizedViewSize();
+    }
+}
+
+async function setMinimizedViewSize() {
+    console.log('Setting minimized view size dynamically');
+
+    // Wait longer for DOM to fully render
+    await new Promise(resolve => setTimeout(resolve, 200));
+
+    const minimizedView = document.getElementById('minimized-view');
+    const summary = document.getElementById('columns-summary');
+
+    if (minimizedView && !minimizedView.classList.contains('hidden') && summary) {
+        // Get the natural content width by temporarily removing width constraints
+        const originalStyle = summary.style.cssText;
+        summary.style.width = 'auto';
+        summary.style.maxWidth = 'none';
+
+        // Force layout recalculation
+        summary.offsetWidth;
+
+        // Measure the actual content width
+        const rect = summary.getBoundingClientRect();
+        const contentWidth = rect.width;
+
+        // Restore original styling
+        summary.style.cssText = originalStyle;
+
+        // Add padding (10px left + 10px right) plus extra buffer to prevent clipping
+        const paddedWidth = Math.ceil(contentWidth + 40); // Increased from 20 to 40 to prevent clipping
+
+        // Calculate actual height needed - the minimized view is 40px height + 8px top/bottom padding = 56px
+        // But let's measure it to be sure
+        const minimizedRect = minimizedView.getBoundingClientRect();
+        const actualHeight = Math.ceil(minimizedRect.height);
+
+        const badges = summary.querySelectorAll('.column-badge');
+        console.log(`Minimized view: content width = ${contentWidth}px, final width = ${paddedWidth}px, actual height = ${actualHeight}px, badges = ${badges.length}`);
+
+        try {
+            await invoke('resize_window_to_dimensions', {
+                width: paddedWidth,
+                height: actualHeight
+            });
+        } catch (error) {
+            console.error('Failed to resize minimized window:', error);
+        }
     }
 }
 

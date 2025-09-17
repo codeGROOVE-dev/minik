@@ -181,7 +181,7 @@ async fn update_item_column(project_id: String, item_id: String, column_id: Stri
 }
 
 #[tauri::command]
-fn toggle_expanded(state: State<AppStateWrapper>, app_handle: AppHandle) -> Result<bool, String> {
+fn toggle_expanded(state: State<AppStateWrapper>, _app_handle: AppHandle) -> Result<bool, String> {
     log::debug!("Toggling window expanded state");
     let mut app_state = state.0.lock().unwrap();
     app_state.is_expanded = !app_state.is_expanded;
@@ -189,32 +189,9 @@ fn toggle_expanded(state: State<AppStateWrapper>, app_handle: AppHandle) -> Resu
     let column_count = app_state.last_column_count;
     log::info!("Window expanded state changed to: {}, columns: {}", is_expanded, column_count);
 
-    if let Some(window) = app_handle.get_webview_window("main") {
-        if is_expanded {
-            // Calculate dynamic width based on column count
-            // Using Logical size instead of Physical to handle HiDPI displays correctly
-            let column_width = 190; // Width per column
-            let padding = 12; // Total padding
-            let gap = 4; // Gap between columns
-
-            // Calculate exact width needed for visible columns
-            let width = padding + (column_width * column_count) + (gap * column_count.saturating_sub(1));
-
-            log::info!("Setting expanded window size to {}x480 for {} columns", width, column_count);
-            let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
-                width: width as f64,
-                height: 480.0,
-            }));
-            let _ = window.set_resizable(true);
-        } else {
-            // Increased width to show all column badges properly
-            let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
-                width: 600.0,  // Increased from 400 to accommodate column badges
-                height: 60.0,
-            }));
-            let _ = window.set_resizable(false);
-        }
-    }
+    // Note: Window sizing is now handled dynamically by JavaScript
+    // Rust only handles the state toggle, not the sizing
+    log::info!("Expanded state toggled to: {}, JavaScript will handle dynamic sizing", is_expanded);
 
     Ok(is_expanded)
 }
@@ -265,6 +242,21 @@ fn resize_window_with_height(column_count: u32, height: u32, app_handle: AppHand
             height: final_height as f64,
         }));
         log::info!("Window resized to {} x {} for {} columns", width, final_height, column_count);
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+fn resize_window_to_dimensions(width: u32, height: u32, app_handle: AppHandle) -> Result<(), String> {
+    log::debug!("Resizing window to exact dimensions: {}x{}", width, height);
+
+    if let Some(window) = app_handle.get_webview_window("main") {
+        let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
+            width: width as f64,
+            height: height as f64,
+        }));
+        log::info!("Window resized to exact dimensions: {} x {}", width, height);
     }
 
     Ok(())
@@ -409,6 +401,12 @@ fn show_column(project_id: String, column_id: String, state: State<AppStateWrapp
 fn hidden_columns(state: State<AppStateWrapper>) -> Vec<String> {
     let app_state = state.0.lock().unwrap();
     app_state.hidden_columns.clone()
+}
+
+#[tauri::command]
+fn is_expanded(state: State<AppStateWrapper>) -> bool {
+    let app_state = state.0.lock().unwrap();
+    app_state.is_expanded
 }
 
 #[tauri::command]
@@ -816,6 +814,7 @@ pub fn run() {
             toggle_expanded,
             resize_window_for_columns,
             resize_window_with_height,
+            resize_window_to_dimensions,
             resize_for_context_menu,
             select_project,
             current_project,
@@ -824,6 +823,7 @@ pub fn run() {
             hide_column,
             show_column,
             hidden_columns,
+            is_expanded,
             show_only_my_items,
             current_user,
             update_project_menu,
