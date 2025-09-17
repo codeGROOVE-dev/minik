@@ -25,6 +25,9 @@ const COLUMN_COLORS = ['yellow', 'blue', 'green', 'pink', 'orange', 'purple'];
 document.addEventListener('DOMContentLoaded', async () => {
     console.log('DOM Content Loaded, starting initialization...');
 
+    // Setup window dragging for frameless window
+    setupWindowDragging();
+
     try {
         updateStatus('Checking GitHub authentication...');
         await checkAuth();
@@ -464,10 +467,12 @@ function setupEventListeners() {
 
 async function toggleView() {
     isExpanded = await invoke('toggle_expanded');
+    const dragHandle = document.getElementById('window-drag-handle');
 
     if (isExpanded) {
         document.getElementById('minimized-view').classList.add('hidden');
         document.getElementById('expanded-view').classList.remove('hidden');
+        dragHandle.classList.remove('hidden');
 
         // Resize window based on column count
         if (currentProjectData && currentProjectData.columns) {
@@ -485,6 +490,7 @@ async function toggleView() {
     } else {
         document.getElementById('minimized-view').classList.remove('hidden');
         document.getElementById('expanded-view').classList.add('hidden');
+        dragHandle.classList.add('hidden');
     }
 }
 
@@ -527,6 +533,78 @@ function updateStatus(message) {
         statusElement.textContent = message;
         console.log(`Status: ${message}`);
     }
+}
+
+function setupWindowDragging() {
+    console.log('Setting up window dragging for frameless window...');
+
+    // Wait a bit for Tauri APIs to be fully loaded
+    setTimeout(async () => {
+        try {
+            // Check if Tauri API is available
+            if (!window.__TAURI__) {
+                console.error('Tauri API not available');
+                return;
+            }
+
+            // Helper function to start dragging
+            const startDragging = async (e) => {
+                // Don't interfere with card dragging
+                if (isDragging || e.target.closest('.kanban-card')) {
+                    return;
+                }
+
+                if (e.button === 0) { // Left mouse button
+                    e.preventDefault();
+                    e.stopPropagation();
+
+                    try {
+                        console.log('Starting window drag...');
+                        // Use Tauri v2 API structure
+                        const { getCurrentWindow } = window.__TAURI__.window;
+                        const appWindow = getCurrentWindow();
+                        await appWindow.startDragging();
+                        console.log('Window drag completed');
+                    } catch (error) {
+                        console.error('Failed to start window dragging:', error);
+                        console.error('Error details:', error.message || error);
+                    }
+                }
+            };
+
+            // Make minimized view draggable
+            const minimizedView = document.getElementById('minimized-view');
+            if (minimizedView) {
+                console.log('Adding drag handler to minimized view');
+                minimizedView.addEventListener('mousedown', startDragging);
+            }
+
+            // Make expanded view draggable via column headers and empty space
+            document.addEventListener('mousedown', async (e) => {
+                // Check if we're in expanded view
+                const expandedView = document.getElementById('expanded-view');
+                if (!expandedView || expandedView.classList.contains('hidden')) {
+                    return;
+                }
+
+                // Allow dragging from column headers, window drag handle, or empty areas
+                const isDragArea = (
+                    e.target.closest('.column-header') ||
+                    e.target.closest('#window-drag-handle') ||
+                    e.target.id === 'kanban-board' ||
+                    e.target.id === 'expanded-view'
+                );
+
+                if (isDragArea) {
+                    await startDragging(e);
+                }
+            });
+
+            console.log('Window dragging setup complete');
+        } catch (error) {
+            console.error('Error setting up window dragging:', error);
+        }
+    }, 100); // Small delay to ensure Tauri APIs are ready
 }
 
 // Listen for project selection from Rust backend

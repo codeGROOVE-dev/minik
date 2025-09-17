@@ -5,11 +5,14 @@
     <link rel="stylesheet" href="styles.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Minik - GitHub Kanban</title>
-    <script type="module" src="/main.js" defer></script>
+    <script type="module" src="main.js" defer></script>
   </head>
 
   <body>
     <div id="app" class="app">
+      <!-- Window drag handle for expanded view -->
+      <div id="window-drag-handle" class="window-drag-handle hidden"></div>
+
       <!-- Minimized View -->
       <div id="minimized-view" class="minimized-view">
         <div class="columns-summary" id="columns-summary">

@@ -34,7 +34,6 @@ body {
   align-items: center;
   cursor: move;
   user-select: none;
-  -webkit-app-region: drag;
 }
 
 
@@ -46,7 +45,6 @@ body {
   color: #333;
   flex-wrap: nowrap;
   overflow-x: auto;
-  -webkit-app-region: no-drag;
   letter-spacing: 0.2px;
 }
 
@@ -97,7 +95,6 @@ body {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  -webkit-app-region: no-drag; /* Changed to no-drag to allow drag-and-drop */
 }
 
 
@@ -108,7 +105,17 @@ body {
   overflow-x: auto;
   padding: 6px;
   align-items: flex-start;
-  -webkit-app-region: no-drag;
+}
+
+/* Window drag handle - top area of the app */
+.window-drag-handle {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 20px;
+  z-index: 9999;
+  cursor: move;
 }
 
 .kanban-column {
@@ -145,6 +152,7 @@ body {
   backdrop-filter: blur(2px);
   letter-spacing: 0.3px;
   font-family: "SF Pro Text", "Inter", -apple-system, sans-serif;
+  cursor: move;
 }
 
 .column-count-badge {
