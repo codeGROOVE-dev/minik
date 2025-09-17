@@ -698,13 +698,27 @@ function setupContextMenuListeners() {
         await showProjectSelector();
     });
 
-    // Add right-click handlers to the app - unified context menu from anywhere
+    // Listen for optimized project selector with pre-fetched data
+    listen('show-project-context-menu-with-projects', async (event) => {
+        console.log('Show project selector with pre-fetched data received');
+        console.log('Event payload:', event.payload);
+        console.log('Event payload type:', typeof event.payload);
+        console.log('Event payload keys:', event.payload ? Object.keys(event.payload) : 'null');
+        await showProjectMenuWithData(event.payload);
+    });
+
+    // Add right-click handlers to the app - hierarchical context menu from anywhere
     document.addEventListener('contextmenu', async (e) => {
         e.preventDefault(); // Prevent default context menu
 
-        // Show unified context menu from anywhere in the app
-        console.log('Right-clicked - showing unified context menu');
-        await showUnifiedContextMenu();
+        // Show hierarchical context menu at mouse position
+        console.log('Right-clicked at', e.clientX, e.clientY, '- showing hierarchical context menu');
+        if (window.showHierarchicalContextMenu) {
+            await window.showHierarchicalContextMenu(e.clientX, e.clientY);
+        } else {
+            console.error('Hierarchical context menu not loaded');
+            await showUnifiedContextMenu();
+        }
     });
 }
 
@@ -941,16 +955,44 @@ async function showUnifiedContextMenu() {
 
     content.appendChild(title);
 
-    // Add Projects submenu
+    // Add Projects submenu with expandable behavior
     const projectsItem = document.createElement('div');
     projectsItem.className = 'context-menu-item context-menu-expandable';
+    projectsItem.id = 'projects-menu-item';
     projectsItem.innerHTML = 'Projects <span style="float: right;">›</span>';
+
+    // Create a container for the expanded projects
+    const projectsContainer = document.createElement('div');
+    projectsContainer.className = 'context-menu-expanded-section';
+    projectsContainer.style.display = 'none';
+
     projectsItem.addEventListener('click', async () => {
-        console.log('Projects menu clicked - invoking show_project_context_menu');
-        // Don't remove the menu immediately, let the backend trigger the new menu
-        await invoke('show_project_context_menu');
+        console.log('Projects menu clicked - expanding inline');
+
+        // Toggle expansion
+        const isExpanded = projectsContainer.style.display !== 'none';
+        if (isExpanded) {
+            projectsContainer.style.display = 'none';
+            projectsItem.innerHTML = 'Projects <span style="float: right;">›</span>';
+        } else {
+            projectsItem.innerHTML = 'Projects <span style="float: right;">˅</span>';
+            projectsContainer.style.display = 'block';
+
+            // Check if we have pending data
+            if (window.pendingProjectData) {
+                console.log('Using pending project data');
+                await showProjectMenuWithData(window.pendingProjectData);
+                window.pendingProjectData = null;
+            } else {
+                projectsContainer.innerHTML = '<div class="context-menu-loading">Loading...</div>';
+                // Fetch projects in the background
+                await invoke('show_project_context_menu');
+            }
+        }
     });
+
     content.appendChild(projectsItem);
+    content.appendChild(projectsContainer);
 
     // Add Columns submenu (only if project is loaded)
     if (currentProjectData) {
@@ -980,6 +1022,15 @@ function removeContextMenu() {
         existing.remove();
     }
 }
+
+// Make functions and variables globally available for hierarchical-menu.js
+window.removeContextMenu = removeContextMenu;
+window.getCurrentProjectData = () => currentProjectData;
+window.setCurrentProjectData = (data) => { currentProjectData = data; };
+window.COLUMN_COLORS = COLUMN_COLORS;
+window.loadProjectData = loadProjectData;
+window.renderProject = renderProject;
+window.showError = showError;
 
 async function showProjectSelector() {
     // Remove any existing menu first
@@ -1033,6 +1084,94 @@ async function showProjectSelector() {
     } catch (error) {
         console.error('Failed to show project selector:', error);
         showError(`Failed to load projects: ${error}`);
+    }
+}
+
+async function showProjectMenuWithData(orgProjects) {
+    try {
+        console.log('Processing pre-fetched project data for inline menu:', orgProjects);
+
+        // Wait a bit for the menu to be created if it doesn't exist yet
+        let projectsContainer = document.querySelector('.context-menu-expanded-section');
+        if (!projectsContainer) {
+            // Menu might not be created yet, wait for it
+            await new Promise(resolve => setTimeout(resolve, 100));
+            projectsContainer = document.querySelector('.context-menu-expanded-section');
+        }
+
+        if (!projectsContainer) {
+            console.log('Projects container not found, menu might not be open');
+            // Store the data for when the menu opens
+            window.pendingProjectData = orgProjects;
+            return;
+        }
+
+        // Clear loading state
+        projectsContainer.innerHTML = '';
+
+        // Process the projects data
+        let hasProjects = false;
+
+        for (const [orgLogin, projects] of Object.entries(orgProjects)) {
+            if (projects && projects.length > 0) {
+                hasProjects = true;
+
+                // Create organization section
+                const orgSection = document.createElement('div');
+                orgSection.className = 'context-menu-section';
+
+                const orgTitle = document.createElement('div');
+                orgTitle.className = 'context-menu-org-title';
+                orgTitle.textContent = orgLogin;
+                orgSection.appendChild(orgTitle);
+
+                // Add projects for this organization
+                projects.forEach(project => {
+                    const projectItem = document.createElement('div');
+                    projectItem.className = 'context-menu-item context-menu-nested';
+                    projectItem.textContent = project.title;
+
+                    projectItem.addEventListener('click', async () => {
+                        console.log('=====================================')
+                        console.log('PROJECT SELECTED');
+                        console.log('=====================================')
+                        console.log('Selected project:', project.id, project.title);
+
+                        removeContextMenu();
+
+                        try {
+                            console.log(`Invoking select_project with ID: ${project.id}`);
+                            await invoke('select_project', { projectId: project.id });
+                            console.log('Project selection command sent to backend');
+
+                            console.log(`Loading project data for ID: ${project.id}`);
+                            await loadProjectData(project.id);
+                            console.log('Project data loaded successfully');
+                        } catch (error) {
+                            console.error('Failed to select project:', error);
+                            showError(`Failed to select project: ${error}`);
+                        }
+                    });
+
+                    orgSection.appendChild(projectItem);
+                });
+
+                projectsContainer.appendChild(orgSection);
+            }
+        }
+
+        if (!hasProjects) {
+            projectsContainer.innerHTML = '<div class="context-menu-no-items">No projects found</div>';
+        }
+
+        console.log('Project menu populated inline');
+
+    } catch (error) {
+        console.error('Failed to populate project menu:', error);
+        const projectsContainer = document.querySelector('.context-menu-expanded-section');
+        if (projectsContainer) {
+            projectsContainer.innerHTML = '<div class="context-menu-error">Failed to load projects</div>';
+        }
     }
 }
 

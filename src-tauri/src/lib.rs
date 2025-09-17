@@ -332,6 +332,44 @@ fn toggle_column_visibility(column_id: String, state: State<AppStateWrapper>) ->
 }
 
 #[tauri::command]
+fn hide_column(project_id: String, column_id: String, state: State<AppStateWrapper>) -> Result<(), String> {
+    log::info!("Hiding column {} for project {}", column_id, project_id);
+    let mut app_state = state.0.lock().unwrap();
+
+    // Add to hidden columns if not already hidden
+    if !app_state.hidden_columns.contains(&column_id) {
+        app_state.hidden_columns.push(column_id.clone());
+    }
+
+    // Update project-specific settings
+    let hidden_cols = app_state.hidden_columns.clone();
+    app_state.project_column_settings.insert(project_id, hidden_cols);
+
+    save_state(&app_state);
+    log::debug!("Column {} hidden successfully", column_id);
+    Ok(())
+}
+
+#[tauri::command]
+fn show_column(project_id: String, column_id: String, state: State<AppStateWrapper>) -> Result<(), String> {
+    log::info!("Showing column {} for project {}", column_id, project_id);
+    let mut app_state = state.0.lock().unwrap();
+
+    // Remove from hidden columns
+    if let Some(index) = app_state.hidden_columns.iter().position(|c| c == &column_id) {
+        app_state.hidden_columns.remove(index);
+    }
+
+    // Update project-specific settings
+    let hidden_cols = app_state.hidden_columns.clone();
+    app_state.project_column_settings.insert(project_id, hidden_cols);
+
+    save_state(&app_state);
+    log::debug!("Column {} shown successfully", column_id);
+    Ok(())
+}
+
+#[tauri::command]
 fn hidden_columns(state: State<AppStateWrapper>) -> Vec<String> {
     let app_state = state.0.lock().unwrap();
     app_state.hidden_columns.clone()
@@ -439,13 +477,40 @@ async fn update_columns_menu(columns: Vec<github::ProjectColumn>, app_handle: Ap
 // Context menu commands
 #[tauri::command]
 async fn show_project_context_menu(app_handle: AppHandle) -> Result<(), String> {
+    use futures::future::join_all;
     log::debug!("Showing project context menu");
 
-    // Get organizations and projects to build the context menu
+    // Get organizations first
     let orgs = list_organizations().await.map_err(|e| format!("Failed to get organizations: {}", e))?;
 
+    // Fetch all projects in parallel
+    let org_project_futures: Vec<_> = orgs.iter().map(|org| {
+        let org_login = org.login.clone();
+        async move {
+            let projects = list_org_projects(org_login.clone()).await.unwrap_or_default();
+            (org_login, projects)
+        }
+    }).collect();
+
+    let org_projects = join_all(org_project_futures).await;
+
+    // Build a simple HashMap-like structure for the frontend
+    let projects_by_org: std::collections::HashMap<String, Vec<serde_json::Value>> =
+        org_projects.into_iter()
+            .filter(|(_, projects)| !projects.is_empty())
+            .map(|(org_login, projects)| {
+                let project_values: Vec<serde_json::Value> = projects.into_iter()
+                    .map(|p| serde_json::to_value(p).unwrap_or(serde_json::Value::Null))
+                    .collect();
+                (org_login, project_values)
+            })
+            .collect();
+
+    log::info!("Sending projects to frontend: {:?}", projects_by_org.keys().collect::<Vec<_>>());
+
     if let Some(window) = app_handle.get_webview_window("main") {
-        let _ = window.emit("show-project-context-menu", orgs);
+        let result = window.emit("show-project-context-menu-with-projects", &projects_by_org);
+        log::info!("Event emit result: {:?}", result);
     }
 
     Ok(())
@@ -719,6 +784,8 @@ pub fn run() {
             current_project,
             toggle_my_items,
             toggle_column_visibility,
+            hide_column,
+            show_column,
             hidden_columns,
             show_only_my_items,
             current_user,
