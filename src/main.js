@@ -13,6 +13,11 @@ if (window.__TAURI__.shell) {
 let currentProjectData = null;
 let isExpanded = false;
 let refreshInterval = null;
+let draggedItem = null;
+let isDragging = false;
+let dragElement = null;
+let dragOffset = { x: 0, y: 0 };
+let originalParent = null;
 
 const COLUMN_COLORS = ['yellow', 'blue', 'green', 'pink', 'orange', 'purple'];
 
@@ -178,7 +183,11 @@ function renderExpandedView() {
         const cardsHtml = items.map(item => {
             const hasMetadata = item.assignees.length > 0 || item.labels.length > 0;
             return `
-                <div class="kanban-card" data-url="${item.url || '#'}">
+                <div class="kanban-card"
+                     draggable="true"
+                     data-item-id="${item.id}"
+                     data-column-id="${column.id}"
+                     data-url="${item.url || '#'}">
                     <div class="card-title">${escapeHtml(item.title)}</div>
                     ${hasMetadata ? `
                         <div class="card-meta">
@@ -196,7 +205,7 @@ function renderExpandedView() {
         }).join('');
 
         return `
-            <div class="kanban-column ${colorClass}">
+            <div class="kanban-column ${colorClass}" data-column-id="${column.id}">
                 <div class="column-header">
                     <span>${escapeHtml(column.name)}</span>
                     <span class="column-count-badge">${items.length}</span>
@@ -210,14 +219,194 @@ function renderExpandedView() {
 
     board.innerHTML = columnsHtml || '<div style="padding: 20px; color: #999;">No columns to display</div>';
 
-    // Add click handlers for cards
-    board.querySelectorAll('.kanban-card').forEach(card => {
-        card.addEventListener('click', () => {
-            const url = card.dataset.url;
-            if (url && url !== '#') {
-                open(url);
+    // Add click and custom drag handlers for cards
+    const cards = board.querySelectorAll('.kanban-card');
+    console.log(`Setting up drag handlers for ${cards.length} cards`);
+
+    cards.forEach((card, index) => {
+        // Remove native draggable attribute to avoid conflicts
+        card.draggable = false;
+        card.style.cursor = 'grab';
+
+        // Click handler for opening URLs
+        card.addEventListener('click', (e) => {
+            // Don't open URL if we just finished dragging
+            if (!isDragging) {
+                const url = card.dataset.url;
+                if (url && url !== '#') {
+                    open(url);
+                }
             }
         });
+
+        // Custom drag implementation using mouse events
+        card.addEventListener('mousedown', (e) => {
+            e.preventDefault(); // Prevent text selection
+            e.stopPropagation();
+
+            console.log('🖱️ Mouse down on card:', card.dataset.itemId);
+
+            // Store the original position
+            const rect = card.getBoundingClientRect();
+            dragOffset.x = e.clientX - rect.left;
+            dragOffset.y = e.clientY - rect.top;
+
+            // Create a drag clone
+            dragElement = card.cloneNode(true);
+            dragElement.style.position = 'fixed';
+            dragElement.style.zIndex = '10000';
+            dragElement.style.opacity = '0.8';
+            dragElement.style.cursor = 'grabbing';
+            dragElement.style.pointerEvents = 'none';
+            dragElement.style.width = rect.width + 'px';
+            dragElement.style.left = (e.clientX - dragOffset.x) + 'px';
+            dragElement.style.top = (e.clientY - dragOffset.y) + 'px';
+            dragElement.classList.add('dragging');
+            document.body.appendChild(dragElement);
+
+            // Store drag info
+            draggedItem = {
+                itemId: card.dataset.itemId,
+                fromColumnId: card.dataset.columnId,
+                element: card
+            };
+
+            // Mark original card as being dragged
+            card.style.opacity = '0.3';
+            originalParent = card.parentElement;
+
+            isDragging = true;
+
+            console.log('🎯 Custom drag started:', {
+                itemId: draggedItem.itemId,
+                fromColumnId: draggedItem.fromColumnId,
+                cardTitle: card.querySelector('.card-title')?.textContent
+            });
+        });
+    });
+
+    // Global mouse event handlers for custom drag
+    document.addEventListener('mousemove', (e) => {
+        if (isDragging && dragElement) {
+            e.preventDefault();
+            dragElement.style.left = (e.clientX - dragOffset.x) + 'px';
+            dragElement.style.top = (e.clientY - dragOffset.y) + 'px';
+
+            // Check which column we're over
+            const elementBelow = document.elementFromPoint(e.clientX, e.clientY);
+            if (elementBelow) {
+                const column = elementBelow.closest('.kanban-column');
+
+                // Remove drag-over from all columns
+                board.querySelectorAll('.kanban-column').forEach(col => {
+                    col.classList.remove('drag-over');
+                });
+
+                // Add drag-over to current column
+                if (column) {
+                    column.classList.add('drag-over');
+                }
+            }
+        }
+    });
+
+    document.addEventListener('mouseup', async (e) => {
+        if (isDragging) {
+            console.log('🏁 Mouse up - ending drag');
+
+            // Find which column we're dropping on
+            const elementBelow = document.elementFromPoint(e.clientX, e.clientY);
+            let targetColumn = null;
+
+            if (elementBelow) {
+                targetColumn = elementBelow.closest('.kanban-column');
+            }
+
+            // Clean up drag visuals
+            if (dragElement) {
+                document.body.removeChild(dragElement);
+                dragElement = null;
+            }
+
+            // Remove drag-over styling
+            board.querySelectorAll('.kanban-column').forEach(col => {
+                col.classList.remove('drag-over');
+            });
+
+            // Restore original card opacity
+            if (draggedItem && draggedItem.element) {
+                draggedItem.element.style.opacity = '1';
+            }
+
+            // Handle the drop
+            if (targetColumn && draggedItem) {
+                const toColumnId = targetColumn.dataset.columnId;
+                const toColumnName = targetColumn.querySelector('.column-header span')?.textContent;
+
+                // Store draggedItem data before async operation
+                const itemToMove = {
+                    itemId: draggedItem.itemId,
+                    fromColumnId: draggedItem.fromColumnId
+                };
+
+                console.log('📦 Drop event:', {
+                    fromColumnId: itemToMove.fromColumnId,
+                    toColumnId: toColumnId,
+                    toColumnName: toColumnName,
+                    itemId: itemToMove.itemId
+                });
+
+                // Only update if moved to a different column
+                if (itemToMove.fromColumnId !== toColumnId) {
+                    console.log(`🚀 Moving item ${itemToMove.itemId} to ${toColumnName}`);
+
+                    try {
+                        console.log('📡 Calling update_item_column with:', {
+                            projectId: currentProjectData.project.id,
+                            itemId: itemToMove.itemId,
+                            columnId: toColumnId
+                        });
+
+                        await invoke('update_item_column', {
+                            projectId: currentProjectData.project.id,
+                            itemId: itemToMove.itemId,
+                            columnId: toColumnId
+                        });
+
+                        console.log('✅ GitHub update successful');
+
+                        // Update local data
+                        const item = currentProjectData.items.find(i => i.id === itemToMove.itemId);
+                        if (item) {
+                            console.log('📝 Updating local item data');
+                            const oldColumnId = item.column_id;
+                            item.column_id = toColumnId;
+                            console.log(`Local update: ${oldColumnId} -> ${toColumnId}`);
+                            renderExpandedView();
+                            renderMinimizedView();
+                        } else {
+                            console.error('❌ Item not found in local data:', itemToMove.itemId);
+                        }
+                    } catch (error) {
+                        console.error('❌ Failed to update item:', error);
+                        showError(`Failed to move item: ${error}`);
+                        // Refresh to restore correct state
+                        await loadProjectData(currentProjectData.project.id);
+                    }
+                } else {
+                    console.log('ℹ️ Item dropped in same column, no update needed');
+                }
+            }
+
+            // Reset drag state
+            isDragging = false;
+            draggedItem = null;
+
+            // Small delay to prevent click event from firing
+            setTimeout(() => {
+                isDragging = false;
+            }, 100);
+        }
     });
 }
 

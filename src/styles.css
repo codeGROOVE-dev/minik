@@ -92,7 +92,7 @@ body {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  -webkit-app-region: drag;
+  -webkit-app-region: no-drag; /* Changed to no-drag to allow drag-and-drop */
 }
 
 
@@ -259,6 +259,28 @@ body {
   color: rgba(0, 0, 0, 0.3);
   font-size: 10px;
   font-style: italic;
+}
+
+/* Drag and drop styles */
+.kanban-card {
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.kanban-card:active {
+  cursor: grabbing;
+}
+
+.kanban-card.dragging {
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+  transform: rotate(2deg);
+}
+
+.kanban-column.drag-over {
+  background-color: rgba(100, 200, 255, 0.3) !important;
+  border: 2px dashed rgba(100, 200, 255, 0.8);
+  transition: all 0.2s ease;
 }
 
 /* Scrollbar Styling */

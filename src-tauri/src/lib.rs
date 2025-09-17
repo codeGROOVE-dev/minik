@@ -18,6 +18,8 @@ struct AppState {
     window_y: i32,
     #[serde(default)]
     last_column_count: u32,
+    #[serde(default)]
+    status_field_id: String,
 }
 
 impl Default for AppState {
@@ -30,6 +32,7 @@ impl Default for AppState {
             window_x: 100,
             window_y: 50,
             last_column_count: 5,
+            status_field_id: String::new(),
         }
     }
 }
@@ -112,11 +115,55 @@ async fn project_data(project_id: String, state: State<'_, AppStateWrapper>) -> 
     if let Ok(ref data) = result {
         log::info!("Successfully fetched project '{}' with {} columns and {} items",
                   data.project.title, data.columns.len(), data.items.len());
-        // Store the column count for later use
+        // Store the column count and field ID for later use
         let mut app_state = state.0.lock().unwrap();
         app_state.last_column_count = data.columns.len() as u32;
+        app_state.status_field_id = data.status_field_id.clone();
     }
     result
+}
+
+#[tauri::command]
+async fn update_item_column(project_id: String, item_id: String, column_id: String, state: State<'_, AppStateWrapper>) -> Result<(), String> {
+    log::info!("\n🎯🎯🎯 UPDATE_ITEM_COLUMN COMMAND CALLED 🎯🎯🎯");
+    log::info!("  Project ID: {}", project_id);
+    log::info!("  Item ID: {}", item_id);
+    log::info!("  Target Column ID: {}", column_id);
+
+    let field_id = {
+        let app_state = state.0.lock().unwrap();
+        let field_id = app_state.status_field_id.clone();
+        log::info!("  Retrieved Status Field ID from state: '{}'", field_id);
+        field_id
+    };
+
+    if field_id.is_empty() {
+        log::error!("❌ Status field ID is empty! Cannot proceed with update.");
+        return Err("Status field ID not found - please refresh the project".to_string());
+    }
+
+    log::info!("📞 Creating GitHub client...");
+    let client = GitHubClient::new().map_err(|e| {
+        log::error!("❌ Failed to create GitHub client: {}", e);
+        e.to_string()
+    })?;
+    log::info!("✅ GitHub client created successfully");
+
+    log::info!("🚀 Calling update_item_field on GitHub client...");
+    let result = client
+        .update_item_field(&project_id, &item_id, &field_id, &column_id)
+        .await;
+
+    match result {
+        Ok(_) => {
+            log::info!("✅✅✅ Successfully updated item column on GitHub!");
+            Ok(())
+        }
+        Err(e) => {
+            log::error!("❌❌❌ Failed to update item column: {}", e);
+            Err(format!("GitHub API error: {}", e))
+        }
+    }
 }
 
 #[tauri::command]
@@ -299,6 +346,7 @@ pub fn run() {
             list_organizations,
             list_org_projects,
             project_data,
+            update_item_column,
             toggle_expanded,
             resize_window_for_columns,
             select_project,

@@ -40,6 +40,7 @@ pub struct ProjectData {
     pub project: Project,
     pub columns: Vec<ProjectColumn>,
     pub items: Vec<ProjectItem>,
+    pub status_field_id: String,
 }
 
 pub struct GitHubClient {
@@ -239,6 +240,7 @@ impl GitHubClient {
 
         let mut columns = Vec::new();
         let mut column_map = std::collections::HashMap::new();
+        let mut status_field_id = String::new();
 
         if let Some(views) = project_node["views"]["nodes"].as_array() {
             if let Some(first_view) = views.first() {
@@ -250,6 +252,8 @@ impl GitHubClient {
                         if field_name == "Status" {
                             if let Some(options) = field["options"].as_array() {
                                 let field_id = field["id"].as_str().unwrap_or_default();
+                                status_field_id = field_id.to_string();
+                                info!("Found Status field with ID: {}", field_id);
                                 for option in options {
                                     let option_id = option["id"].as_str().unwrap_or_default().to_string();
                                     let option_name = option["name"].as_str().unwrap_or_default().to_string();
@@ -259,7 +263,7 @@ impl GitHubClient {
                                         name: option_name.clone(),
                                         items_count: 0,
                                     });
-                                    trace!("  Column: {} - {}", option_name, option_id);
+                                    info!("  Status column: '{}' with option ID: {}", option_name, option_id);
                                 }
                             }
                         }
@@ -331,24 +335,91 @@ impl GitHubClient {
             project,
             columns,
             items,
+            status_field_id,
         })
     }
 
+    pub async fn update_item_field(&self, project_id: &str, item_id: &str, field_id: &str, option_id: &str) -> Result<()> {
+        info!("====== DRAG & DROP UPDATE ======");
+        info!("Project ID: {}", project_id);
+        info!("Item ID: {}", item_id);
+        info!("Field ID (Status): {}", field_id);
+        info!("Option ID (Column): {}", option_id);
+        info!("=================================");
+
+        let mutation = r#"
+        mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: ProjectV2FieldValue!) {
+            updateProjectV2ItemFieldValue(input: {
+                projectId: $projectId
+                itemId: $itemId
+                fieldId: $fieldId
+                value: $value
+            }) {
+                projectV2Item {
+                    id
+                }
+            }
+        }
+        "#;
+
+        let variables = serde_json::json!({
+            "projectId": project_id,
+            "itemId": item_id,
+            "fieldId": field_id,
+            "value": {
+                "singleSelectOptionId": option_id
+            }
+        });
+
+        info!("Sending GraphQL mutation with variables: {}", serde_json::to_string_pretty(&variables).unwrap_or_default());
+
+        let response = self.graphql_request(mutation, variables).await?;
+
+        info!("GraphQL response: {}", serde_json::to_string_pretty(&response).unwrap_or_default());
+
+        if let Some(errors) = response["errors"].as_array() {
+            if !errors.is_empty() {
+                error!("GraphQL errors: {:?}", errors);
+                anyhow::bail!("GraphQL errors: {:?}", errors);
+            }
+        }
+
+        if response["data"]["updateProjectV2ItemFieldValue"]["projectV2Item"]["id"].is_null() {
+            error!("Failed to update item field - no item ID in response");
+            error!("Full response: {:?}", response);
+            anyhow::bail!("Failed to update item field - no item ID in response");
+        }
+
+        info!("✅ Successfully updated item to new column!");
+        Ok(())
+    }
+
     async fn graphql_request(&self, query: &str, variables: serde_json::Value) -> Result<serde_json::Value> {
-        trace!("GraphQL request with variables: {:?}", variables);
+        info!("🌐 ========== GRAPHQL REQUEST ==========");
+        info!("📍 Endpoint: https://api.github.com/graphql");
+        info!("🔑 Token present: {} (length: {})", !self.token.is_empty(), self.token.len());
+        info!("📝 Query preview: {}", query.lines().take(2).collect::<Vec<_>>().join(" "));
+        info!("📊 Variables: {}", serde_json::to_string_pretty(&variables).unwrap_or_default());
+
         let client = reqwest::Client::new();
+        info!("🚀 Sending HTTP POST request to GitHub GraphQL API...");
+
+        let request_body = serde_json::json!({
+            "query": query,
+            "variables": variables
+        });
+
         let response = client
             .post("https://api.github.com/graphql")
             .header("Authorization", format!("Bearer {}", self.token))
             .header("User-Agent", "Minik-Kanban-App")
-            .json(&serde_json::json!({
-                "query": query,
-                "variables": variables
-            }))
+            .json(&request_body)
             .send()
             .await?;
 
         let status = response.status();
+        info!("📨 Response received! Status: {}", status);
+
         if !status.is_success() {
             let error_text = response.text().await?;
             error!("GraphQL request failed with status {}: {}", status, error_text);
