@@ -228,6 +228,31 @@ fn resize_window_for_columns(column_count: u32, app_handle: AppHandle) -> Result
 }
 
 #[tauri::command]
+fn resize_window_with_height(column_count: u32, height: u32, app_handle: AppHandle) -> Result<(), String> {
+    log::debug!("Resizing window for {} columns with height {}", column_count, height);
+
+    if let Some(window) = app_handle.get_webview_window("main") {
+        // Calculate width: base padding + (column width * count) + gaps
+        let column_width = 190; // Width per column
+        let padding = 12; // Total padding (bare minimum)
+        let gap = 4; // Gap between columns (bare minimum)
+        let width = padding + (column_width * column_count) + (gap * (column_count - 1).max(0));
+        let width = width.min(1200).max(600); // Clamp between 600 and 1200
+
+        // Use the calculated height from JavaScript, but cap it at 480 max
+        let final_height = height.min(480);
+
+        let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
+            width: width as f64,
+            height: final_height as f64,
+        }));
+        log::info!("Window resized to {} x {} for {} columns", width, final_height, column_count);
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
 fn select_project(project_id: String, state: State<AppStateWrapper>) -> Result<(), String> {
     log::info!("Selecting project: {}", project_id);
     let mut app_state = state.0.lock().unwrap();
@@ -349,6 +374,7 @@ pub fn run() {
             update_item_column,
             toggle_expanded,
             resize_window_for_columns,
+            resize_window_with_height,
             select_project,
             current_project,
             toggle_my_items,

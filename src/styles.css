@@ -13,12 +13,15 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+  pointer-events: none; /* Make body transparent to clicks */
 }
 
 .app {
   width: 100%;
-  height: 100vh;
+  height: 100%;
   position: relative;
+  overflow: hidden;
+  pointer-events: none; /* Make app container transparent to clicks */
 }
 
 .hidden {
@@ -34,6 +37,7 @@ body {
   align-items: center;
   cursor: move;
   user-select: none;
+  pointer-events: auto; /* Minimized view is clickable */
 }
 
 
@@ -92,9 +96,10 @@ body {
 /* Expanded View */
 .expanded-view {
   background: transparent;
-  height: 100vh;
+  height: auto;
   display: flex;
   flex-direction: column;
+  pointer-events: none; /* Make container transparent to clicks */
 }
 
 
@@ -105,6 +110,8 @@ body {
   overflow-x: auto;
   padding: 6px;
   align-items: flex-start;
+  height: fit-content;
+  pointer-events: none; /* Make board transparent to clicks */
 }
 
 /* Window drag handle - top area of the app */
@@ -116,6 +123,7 @@ body {
   height: 20px;
   z-index: 9999;
   cursor: move;
+  pointer-events: auto; /* Drag handle is clickable */
 }
 
 .kanban-column {
@@ -127,7 +135,8 @@ body {
   padding: 4px;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
   height: fit-content;
-  max-height: calc(100vh - 20px);
+  max-height: 460px;
+  pointer-events: auto; /* Only columns are clickable */
 }
 
 /* Column Colors - Stickies Inspired */
@@ -169,7 +178,7 @@ body {
   flex-direction: column;
   gap: 2px;
   overflow-y: auto;
-  max-height: calc(100vh - 60px);
+  max-height: 420px;
   padding: 0;
 }
 
@@ -263,6 +272,7 @@ body {
   gap: 12px;
   max-width: 400px;
   z-index: 1000;
+  pointer-events: auto; /* Error messages are clickable */
 }
 
 .error-close {

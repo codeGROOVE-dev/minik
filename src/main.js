@@ -171,6 +171,47 @@ function renderMinimizedView() {
     summary.innerHTML = columnsHtml || '<span class="loading">No project selected</span>';
 }
 
+async function calculateAndSetWindowHeight() {
+    // Wait for render to complete
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    const board = document.getElementById('kanban-board');
+    const expandedView = document.getElementById('expanded-view');
+
+    if (expandedView && !expandedView.classList.contains('hidden')) {
+        // Calculate actual content height
+        const rect = board.getBoundingClientRect();
+        const columns = board.querySelectorAll('.kanban-column');
+
+        let maxHeight = 0;
+        columns.forEach(col => {
+            const colRect = col.getBoundingClientRect();
+            const height = colRect.height;
+            if (height > maxHeight) {
+                maxHeight = height;
+            }
+        });
+
+        // Add padding from the board (6px top + 6px bottom = 12px)
+        const totalHeight = Math.ceil(maxHeight + 12);
+
+        // Resize window to match actual content
+        try {
+            const hiddenColumns = currentProjectData.hiddenColumns || [];
+            const visibleColumns = currentProjectData.columns.filter(
+                col => !hiddenColumns.includes(col.id)
+            );
+
+            await invoke('resize_window_with_height', {
+                columnCount: visibleColumns.length,
+                height: totalHeight
+            });
+        } catch (error) {
+            console.error('Failed to resize window height:', error);
+        }
+    }
+}
+
 function renderExpandedView() {
     const board = document.getElementById('kanban-board');
     const hiddenColumns = currentProjectData.hiddenColumns || [];
@@ -456,13 +497,8 @@ function setupEventListeners() {
         }
     });
 
-    // Click outside to minimize (when expanded)
-    document.addEventListener('click', (e) => {
-        const expandedView = document.getElementById('expanded-view');
-        if (isExpanded && !expandedView.contains(e.target)) {
-            toggleView();
-        }
-    });
+    // Removed click-outside handler to prevent accidental minimizing
+    // Users can double-click or press ESC to minimize instead
 }
 
 async function toggleView() {
@@ -474,18 +510,9 @@ async function toggleView() {
         document.getElementById('expanded-view').classList.remove('hidden');
         dragHandle.classList.remove('hidden');
 
-        // Resize window based on column count
+        // Resize window based on column count and calculate proper height
         if (currentProjectData && currentProjectData.columns) {
-            const hiddenColumns = currentProjectData.hiddenColumns || [];
-            const visibleColumns = currentProjectData.columns.filter(
-                col => !hiddenColumns.includes(col.id)
-            );
-            console.log(`Resizing window for ${visibleColumns.length} columns`);
-            try {
-                await invoke('resize_window_for_columns', { columnCount: visibleColumns.length });
-            } catch (error) {
-                console.error('Failed to resize window:', error);
-            }
+            await calculateAndSetWindowHeight();
         }
     } else {
         document.getElementById('minimized-view').classList.remove('hidden');
