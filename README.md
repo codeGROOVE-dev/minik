@@ -1,8 +1,6 @@
 # minik
 
-Native GitHub Kanban boards but tiny. Like _really_ tiny.
-
-Here's the maximized view:
+Tiny GitHub Kanban boards that stay persistently on top of other windows. Here's the maximized view:
 
 ![minik screenshot](media/maximized.png)
 
