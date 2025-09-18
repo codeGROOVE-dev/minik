@@ -400,11 +400,15 @@ function populateProjectsSubmenu(submenu, projectsByOrg) {
         projects.forEach(project => {
             const projectItem = document.createElement('div');
             projectItem.className = 'context-menu-item';
-            projectItem.textContent = project.title;
 
             // Check if this is the current project
             const currentData = window.getCurrentProjectData ? window.getCurrentProjectData() : null;
-            if (currentData && currentData.project.id === project.id) {
+            const isSelected = currentData && currentData.project.id === project.id;
+
+            // Add checkmark for selected project (with spacing for alignment)
+            projectItem.textContent = (isSelected ? '✓ ' : '   ') + project.title;
+
+            if (isSelected) {
                 projectItem.classList.add('context-menu-item-selected');
             }
 
