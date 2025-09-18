@@ -252,18 +252,48 @@ function renderMinimizedView() {
             .map(word => word.charAt(0).toUpperCase())
             .join('');
 
-        // Get first 2 words of first 2 items
+        // Get more meaningful preview of items
         let itemPreview = '';
         if (columnItems.length > 0) {
+            // Common words to skip at the beginning
+            const skipWords = ['add', 'enable', 'fix', 'update', 'create', 'remove', 'delete', 'implement', 'refactor', 'improve', 'optimize', 'the', 'a', 'an'];
+
+            // Show up to 2 items to ensure they fit
             const previews = columnItems.slice(0, 2).map(item => {
                 if (!item.title) return '';
-                // Get first 2 words
-                const words = item.title.split(/\s+/).slice(0, 2).join(' ');
-                // Don't add ellipsis here - CSS will handle overflow
-                return words.length > 20 ? words.substring(0, 20) : words;
+
+                // Remove quotes, dashes, and other punctuation
+                let cleaned = item.title
+                    .replace(/["'`]/g, '')  // Remove quotes
+                    .replace(/^[-–—]\s*/g, '') // Remove leading dashes
+                    .replace(/[-–—]/g, '')  // Remove all dashes (converts real-time to realtime)
+                    .replace(/\s+/g, ' ')  // Normalize whitespace
+                    .trim();
+
+                // Split into words and filter out common starting words
+                let words = cleaned.split(/\s+/);
+
+                // Skip common meaningless starting words
+                while (words.length > 0 && skipWords.includes(words[0].toLowerCase())) {
+                    words.shift();
+                }
+
+                // For multiple items, take only first 2 meaningful words
+                // For single item, can take more
+                const wordLimit = columnItems.length > 1 ? 2 : 5;
+                const meaningful = words.slice(0, wordLimit).join(' ');
+
+                // No character limit for 2-word display - show full words
+                if (columnItems.length > 1) {
+                    return meaningful; // Show full 2 words without truncation
+                } else {
+                    // Single item can still have a limit
+                    const charLimit = 60;
+                    return meaningful.length > charLimit ? meaningful.substring(0, charLimit) + '…' : meaningful;
+                }
             }).filter(p => p);
 
-            itemPreview = previews.join(', ');
+            itemPreview = previews.join(' | ');
         }
 
         return `
@@ -668,31 +698,31 @@ async function setMinimizedViewSize() {
     const summary = document.getElementById('columns-summary');
 
     if (minimizedView && !minimizedView.classList.contains('hidden') && summary) {
-        // Get the natural content width by temporarily removing width constraints
-        const originalStyle = summary.style.cssText;
-        summary.style.width = 'auto';
-        summary.style.maxWidth = 'none';
+        // Get the natural content width
+        const badges = summary.querySelectorAll('.column-badge');
+        let totalWidth = 0;
 
-        // Force layout recalculation
-        summary.offsetWidth;
+        // Calculate total width needed for all badges
+        badges.forEach(badge => {
+            const badgeRect = badge.getBoundingClientRect();
+            totalWidth += badgeRect.width;
+        });
 
-        // Measure the actual content width
-        const rect = summary.getBoundingClientRect();
-        const contentWidth = rect.width;
+        // Add gaps between badges
+        if (badges.length > 0) {
+            const gap = 2; // From CSS gap: 2px
+            totalWidth += (badges.length - 1) * gap;
+        }
 
-        // Restore original styling
-        summary.style.cssText = originalStyle;
-
-        // Add padding (10px left + 10px right) plus extra buffer to prevent clipping
-        const paddedWidth = Math.ceil(contentWidth + 40); // Increased from 20 to 40 to prevent clipping
+        // Add padding from minimized-view container (12px left + 12px right)
+        const paddedWidth = Math.ceil(totalWidth + 24);
 
         // Calculate actual height needed - the minimized view is 40px height + 8px top/bottom padding = 56px
         // But let's measure it to be sure
         const minimizedRect = minimizedView.getBoundingClientRect();
         const actualHeight = Math.ceil(minimizedRect.height);
 
-        const badges = summary.querySelectorAll('.column-badge');
-        console.log(`Minimized view: content width = ${contentWidth}px, final width = ${paddedWidth}px, actual height = ${actualHeight}px, badges = ${badges.length}`);
+        console.log(`Minimized view: total width = ${totalWidth}px, final width = ${paddedWidth}px, actual height = ${actualHeight}px, badges = ${badges.length}`);
 
         try {
             await invoke('resize_window_to_dimensions', {

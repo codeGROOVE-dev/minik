@@ -48,13 +48,14 @@ body {
 /* Minimized View - Stickies Inspired */
 .minimized-view {
   background: transparent;
-  padding: 8px 12px;
-  height: 40px;
+  padding: 8px 12px; /* Reduced padding to give more room to columns */
+  height: 44px; /* Slightly taller for better readability */
   display: flex;
   align-items: center;
   cursor: move;
   user-select: none;
   pointer-events: auto; /* Minimized view is clickable */
+  width: 100%;
   /* Eliminate any shadows or artifacts */
   -webkit-box-shadow: none !important;
   box-shadow: none !important;
@@ -65,39 +66,42 @@ body {
 
 .columns-summary {
   display: flex;
-  gap: 2px;
-  font-size: 12px;
+  gap: 2px; /* More gap between columns */
+  font-size: 11px;
   font-weight: 500;
   color: #333;
   flex-wrap: nowrap;
   overflow-x: auto;
   letter-spacing: 0.2px;
+  font-family: "SF Pro Text", "Inter", -apple-system, sans-serif;
+  width: 100%;
+  justify-content: flex-start;
+  background: transparent;
 }
 
 .column-badge {
-  padding: 4px 4px;
+  padding: 2px 6px; /* Reduced padding to fit more text */
   border-radius: 0; /* Sharp corners like Stickies */
   white-space: nowrap;
   transition: all 0.2s;
   box-shadow: none; /* No shadow in minimized view */
   font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.1px;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  font-family: "SF Pro Text", "Inter", -apple-system, sans-serif;
   display: inline-flex;
   align-items: baseline;
-  max-width: 1000px; /* Extended width for more content */
   overflow: hidden;
-  text-overflow: ellipsis;
   margin-right: 1px;
 }
 
-/* Minimized view column colors matching expanded */
-.column-badge.column-yellow { background: rgba(255, 251, 141, 0.95); } /* More opaque */
-.column-badge.column-blue { background: rgba(141, 204, 255, 0.95); }
-.column-badge.column-green { background: rgba(141, 255, 183, 0.95); }
-.column-badge.column-pink { background: rgba(255, 141, 197, 0.95); }
-.column-badge.column-orange { background: rgba(255, 183, 141, 0.95); }
-.column-badge.column-purple { background: rgba(197, 141, 255, 0.95); }
+/* Minimized view column colors - fully opaque */
+.column-badge.column-yellow { background: rgb(255, 251, 141); }
+.column-badge.column-blue { background: rgb(141, 204, 255); }
+.column-badge.column-green { background: rgb(141, 255, 183); }
+.column-badge.column-pink { background: rgb(255, 141, 197); }
+.column-badge.column-orange { background: rgb(255, 183, 141); }
+.column-badge.column-purple { background: rgb(197, 141, 255); }
 
 .column-badge:hover {
   transform: translateY(-1px);
@@ -107,23 +111,25 @@ body {
 .column-name {
   font-weight: 700;
   color: #000;
+  font-family: "SF Pro Text", "Inter", -apple-system, sans-serif;
+  letter-spacing: 0.2px;
 }
 
 .column-count {
-  font-weight: 600;
+  font-weight: 700;
   color: rgba(0, 0, 0, 0.7);
   margin-right: 3px;
-  font-size: 10px;
+  font-size: 11px;
+  font-family: "SF Mono", "Menlo", monospace;
 }
 
 .column-items {
-  font-weight: 400;
+  font-weight: 500;
   color: rgba(0, 0, 0, 0.8);
-  font-size: 10px;
-  margin-left: 2px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 930px;
+  font-size: 11px;
+  margin-left: 4px;
+  font-family: "SF Pro Text", "Inter", -apple-system, sans-serif;
+  letter-spacing: 0.1px;
 }
 
 .loading {
@@ -151,9 +157,9 @@ body {
 /* Kanban Board */
 .kanban-board {
   display: flex;
-  gap: 4px;
+  gap: 2px; /* Reduced from 4px to 2px (50%) */
   overflow-x: auto;
-  padding: 6px;
+  padding: 3px; /* Reduced from 6px to 3px (50%) */
   align-items: flex-start;
   height: fit-content;
   pointer-events: none; /* Make board transparent to clicks */
@@ -176,12 +182,12 @@ body {
 }
 
 .kanban-column {
-  width: 190px;
-  min-width: 190px;
+  width: 205px; /* Increased by 20% from 171px */
+  min-width: 205px; /* Increased by 20% from 171px */
   display: flex;
   flex-direction: column;
   border-radius: 0; /* Sharp corners like Stickies */
-  padding: 4px;
+  padding: 2px; /* Reduced from 4px to 2px (50%) */
   box-shadow: 1px 1px 3px rgba(0, 0, 0, 0.08); /* Subtler, more natural shadow */
   height: fit-content;
   /* No max-height - let content determine height */
@@ -200,8 +206,8 @@ body {
   font-size: 11px;
   font-weight: 800;
   color: #000000;
-  margin-bottom: 3px;
-  padding: 3px 5px;
+  margin-bottom: 1px; /* Reduced from 3px to 1px */
+  padding: 1px 2px; /* Reduced from 3px 5px to 1px 2px */
   background: rgba(0, 0, 0, 0.15); /* Slightly lighter header */
   border-radius: 0; /* Sharp corners */
   display: flex;
@@ -215,7 +221,7 @@ body {
 
 .column-count-badge {
   background: rgba(255, 255, 255, 0.4);
-  padding: 1px 4px;
+  padding: 0px 2px; /* Reduced from 1px 4px to 0px 2px */
   border-radius: 0; /* Sharp corners */
   font-size: 10px;
   font-weight: 700;
@@ -225,7 +231,7 @@ body {
 .column-cards {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px; /* Reduced from 2px to 1px (50%) */
   overflow-y: auto;
   /* No max-height - let content determine scrollable area */
   padding: 0;
@@ -235,21 +241,21 @@ body {
 .kanban-card {
   background: rgba(255, 255, 255, 0.75);
   backdrop-filter: blur(10px);
-  padding: 2px 5px;
+  padding: 1px 2px; /* Reduced from 2px 5px to 1px 2px */
   border-radius: 0; /* Sharp corners */
   font-size: 10px;
   line-height: 1.2;
   cursor: pointer;
   transition: all 0.15s;
   box-shadow: 0 0.5px 1px rgba(0, 0, 0, 0.08); /* Very subtle shadow */
-  border: 1px solid rgba(0, 0, 0, 0.08); /* Lighter border */
+  border: 0.5px solid rgba(0, 0, 0, 0.08); /* Reduced from 1px to 0.5px (50%) */
   font-weight: 500;
 }
 
 .kanban-card:hover {
   background: rgba(255, 255, 255, 0.85);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1); /* Subtler hover */
-  transform: translateY(-1px);
+  box-shadow: 0 0.5px 1px rgba(0, 0, 0, 0.1); /* Reduced hover shadow */
+  transform: translateY(-0.5px); /* Reduced from -1px to -0.5px */
   border-color: rgba(0, 0, 0, 0.1);
 }
 
@@ -280,7 +286,7 @@ body {
 
 .assignee {
   background: rgba(0, 0, 0, 0.15);
-  padding: 1px 3px;
+  padding: 0px 1px; /* Reduced from 1px 3px to 0px 1px */
   border-radius: 2px;
   font-size: 9px;
   color: #111;
@@ -297,7 +303,7 @@ body {
 
 .label {
   background: rgba(0, 0, 0, 0.1);
-  padding: 1px 3px;
+  padding: 0px 1px; /* Reduced from 1px 3px to 0px 1px */
   border-radius: 2px;
   font-size: 9px;
   color: #222;
@@ -340,7 +346,7 @@ body {
 
 /* Empty column state */
 .column-empty {
-  padding: 6px;
+  padding: 3px; /* Reduced from 6px to 3px (50%) */
   text-align: center;
   color: rgba(0, 0, 0, 0.3);
   font-size: 9px;
@@ -365,7 +371,7 @@ body {
 
 .kanban-column.drag-over {
   background-color: rgba(100, 200, 255, 0.3) !important;
-  border: 2px dashed rgba(100, 200, 255, 0.8);
+  border: 1px dashed rgba(100, 200, 255, 0.8); /* Reduced from 2px to 1px (50%) */
   transition: all 0.2s ease;
 }
 
