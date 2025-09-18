@@ -741,12 +741,12 @@ async function setMinimizedViewSize() {
 }
 
 function startAutoRefresh() {
-    // Refresh every 5 minutes
+    // Refresh every 90 seconds
     refreshInterval = setInterval(async () => {
         if (currentProjectData) {
             await loadProjectData(currentProjectData.project.id);
         }
-    }, 5 * 60 * 1000);
+    }, 90 * 1000);
 }
 
 function showError(message) {
