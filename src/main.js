@@ -254,7 +254,11 @@ function renderMinimizedView() {
 
         // Get more meaningful preview of items
         let itemPreview = '';
-        if (columnItems.length > 0) {
+
+        // Check if this is a "Done" column (case-insensitive)
+        const isDoneColumn = column.name.toLowerCase() === 'done';
+
+        if (!isDoneColumn && columnItems.length > 0) {
             // Common words to skip at the beginning
             const skipWords = ['add', 'enable', 'fix', 'update', 'create', 'remove', 'delete', 'implement', 'refactor', 'improve', 'optimize', 'the', 'a', 'an'];
 
@@ -295,6 +299,7 @@ function renderMinimizedView() {
 
             itemPreview = previews.join(' | ');
         }
+        // For Done columns, itemPreview stays empty
 
         return `
             <span class="column-badge ${colorClass}">
